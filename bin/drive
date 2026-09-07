@@ -1,0 +1,368 @@
+#!/usr/bin/env python3
+"""aikit acceptance hands: open, click, type, capture.
+
+WHAT: a small browser driver for the acceptance agent. One command per action;
+      after each one the agent gets back an ACCESSIBILITY TREE, and a
+      screenshot is written beside it as evidence for the human.
+
+WHY a tree and not a picture. From a tree the agent sees roles and labels
+      (`button "Save"`) and addresses elements by exactly what it sees. From a
+      screenshot it would be guessing coordinates — wrong more often, and
+      several times the tokens. The screenshot is still taken every time,
+      because the gate (`bin/verdict`) will not accept a passed checklist item
+      without one, and because a person reviewing the run needs to see it.
+
+WHY the budget lives here. "Stop after 120 actions" written in a skill is a
+      wish. Counted here, an exhausted budget makes the next command fail with
+      a legible message, so the report says "got this far, and why" instead of
+      trailing off mid-run. An acceptance run that ran out is "could not",
+      never "good".
+
+WHY it attaches over CDP rather than launching a browser. The stand owns the
+      browser — it may be a container on the stand's network, which is the only
+      place `localhost` and a valid Origin mean the right thing. This driver
+      only needs an address. A project whose browser cannot be reached that way
+      keeps its own driver and points `acceptance.drive` at it.
+
+HOW:  the budget, the state file, target parsing and tree truncation are plain
+      data and are unit-tested (`tests/test_drive.py`). Everything touching
+      Playwright is confined to `_Browser` at the bottom.
+
+    drive begin e52 --max-actions 120 --minutes 45 --cdp http://127.0.0.1:9222
+    drive open http://localhost/
+    drive click 'button=Save'
+    drive type 'textbox=Name' 'Acme'
+    drive snap --name saved
+    drive end
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import pathlib
+import sys
+import time
+from dataclasses import asdict, dataclass
+from typing import Any
+
+DEFAULT_MAX_ACTIONS = 120
+DEFAULT_MINUTES = 45
+DEFAULT_CDP = "http://127.0.0.1:9222"
+# A full admin page is hundreds of tree lines, of which the agent needs dozens.
+# The truncation is HONEST — how many lines were hidden is printed.
+TREE_LINES = 220
+
+
+class Exhausted(RuntimeError):
+    """A budget ran out. The message goes into the report verbatim."""
+
+
+class BadTarget(ValueError):
+    pass
+
+
+# -- state --------------------------------------------------------------------
+
+@dataclass
+class Run:
+    """One acceptance run's budget and where its evidence goes."""
+
+    milestone: str
+    cdp: str
+    started: float
+    max_actions: int
+    minutes: int
+    actions: int = 0
+    step: int = 0
+
+    @property
+    def elapsed_minutes(self) -> float:
+        return (time.time() - self.started) / 60.0
+
+    def charge(self, now: float | None = None) -> None:
+        """Spend one action. Raises before doing anything when a cap is hit.
+
+        Both caps are checked BEFORE the action, not after: a run that
+        discovers it is over budget having already clicked has changed the
+        stand without being able to report what it saw.
+        """
+        elapsed = ((now if now is not None else time.time()) - self.started) / 60.0
+        if self.actions >= self.max_actions:
+            raise Exhausted(
+                f"action budget spent: {self.actions}/{self.max_actions}. "
+                f'Report where you got to — this is "could not", not "good".'
+            )
+        if elapsed >= self.minutes:
+            raise Exhausted(
+                f"time budget spent: {elapsed:.0f}/{self.minutes} minutes. "
+                f'Report where you got to — this is "could not", not "good".'
+            )
+        self.actions += 1
+        self.step += 1
+
+
+def state_path(root: pathlib.Path) -> pathlib.Path:
+    return root / "current.json"
+
+
+def load(root: pathlib.Path) -> Run:
+    path = state_path(root)
+    if not path.is_file():
+        raise SystemExit("[drive] no run in progress — start with `drive begin <milestone>`")
+    return Run(**json.loads(path.read_text(encoding="utf-8")))
+
+
+def save(root: pathlib.Path, run: Run) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    state_path(root).write_text(json.dumps(asdict(run), indent=2), encoding="utf-8")
+
+
+def evidence_dir(root: pathlib.Path, milestone: str) -> pathlib.Path:
+    return root / milestone
+
+
+def shot_name(run: Run, name: str) -> str:
+    """`007-saved.png` — ordered, so the report's evidence reads as a sequence."""
+    slug = "".join(c if c.isalnum() or c in "-_" else "-" for c in (name or "step")).strip("-")
+    return f"{run.step:03d}-{slug or 'step'}.png"
+
+
+# -- targets ------------------------------------------------------------------
+
+# The agent addresses elements by what the tree showed it. `role=name` is the
+# form it will reach for; `css=` and `text=` are the escape hatches for the
+# cases a role cannot express (a file input has no accessible name).
+def parse_target(target: str) -> tuple[str, str]:
+    if "=" not in target:
+        raise BadTarget(
+            f"target {target!r} has no `=`. Use `role=name` (e.g. `button=Save`), "
+            f"`css=<selector>` or `text=<visible text>`."
+        )
+    kind, _, value = target.partition("=")
+    kind, value = kind.strip(), value.strip()
+    if not kind or not value:
+        raise BadTarget(f"target {target!r}: both sides of `=` must be non-empty")
+    return kind, value
+
+
+# -- tree ---------------------------------------------------------------------
+
+def truncate_tree(text: str, limit: int = TREE_LINES) -> str:
+    """Cut a long tree, and say how much was cut. Silent truncation would make
+    the agent believe an element is absent when it is merely below the fold."""
+    lines = text.splitlines()
+    if len(lines) <= limit:
+        return text
+    hidden = len(lines) - limit
+    return "\n".join(lines[:limit] + [f"… {hidden} more lines hidden (tree truncated)"])
+
+
+def flatten(node: Any, depth: int = 0) -> list[str]:
+    """Playwright's accessibility snapshot → indented `role "name"` lines."""
+    if not isinstance(node, dict):
+        return []
+    role = str(node.get("role", "")).strip()
+    name = str(node.get("name", "")).strip()
+    out: list[str] = []
+    if role:
+        label = f'{role} "{name}"' if name else role
+        value = node.get("value")
+        if value not in (None, ""):
+            label += f" = {value!r}"
+        out.append("  " * depth + label)
+        depth += 1
+    for child in node.get("children") or []:
+        out.extend(flatten(child, depth))
+    return out
+
+
+# -- the browser adapter ------------------------------------------------------
+# Everything below this line needs a live Chromium. It is deliberately thin:
+# the rules that make an acceptance run trustworthy (budgets, evidence naming,
+# honest truncation) are all above, where they can be tested without one.
+
+class _Browser:
+    def __init__(self, cdp: str) -> None:
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:  # pragma: no cover - environment, not logic
+            raise SystemExit(
+                "[drive] playwright is not installed. Either `pip install playwright`, "
+                "or point `acceptance.drive` in aikit.yml at the project's own driver."
+            ) from None
+        self._pw = sync_playwright().start()
+        try:
+            self._browser = self._pw.chromium.connect_over_cdp(cdp)
+        except Exception as exc:  # pragma: no cover - environment, not logic
+            self._pw.stop()
+            raise SystemExit(
+                f"[drive] no browser at {cdp}: {exc}\n"
+                f"        The stand owns the browser — check that `acceptance.stand.up` "
+                f"ran and published its debugging port."
+            ) from None
+        contexts = self._browser.contexts
+        context = contexts[0] if contexts else self._browser.new_context()
+        self.page = context.pages[0] if context.pages else context.new_page()
+
+    def close(self) -> None:
+        try:
+            self._browser.close()
+        finally:
+            self._pw.stop()
+
+    def locate(self, target: str) -> Any:
+        kind, value = parse_target(target)
+        if kind == "css":
+            return self.page.locator(value)
+        if kind == "text":
+            return self.page.get_by_text(value, exact=False).first
+        return self.page.get_by_role(kind, name=value).first
+
+    def tree(self) -> str:
+        snapshot = self.page.accessibility.snapshot()
+        return truncate_tree("\n".join(flatten(snapshot)) or "(empty tree)")
+
+    def shot(self, path: pathlib.Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.page.screenshot(path=str(path), full_page=False)
+
+
+def act(browser: _Browser, args: argparse.Namespace) -> None:
+    """One action. Kept apart from reporting so the dispatch reads as a list."""
+    page = browser.page
+    if args.command == "open":
+        page.goto(args.url, wait_until="domcontentloaded")
+    elif args.command == "click":
+        browser.locate(args.target).click()
+    elif args.command == "fill":
+        browser.locate(args.target).fill(args.text)
+    elif args.command == "type":
+        # Real keystrokes, not a value assignment: the bugs worth finding here
+        # (focus lost after each character) only appear under real typing.
+        browser.locate(args.target).press_sequentially(args.text, delay=25)
+    elif args.command == "press":
+        page.keyboard.press(args.key)
+    elif args.command == "back":
+        page.go_back()
+    elif args.command == "reload":
+        page.reload()
+    elif args.command == "wait":
+        page.get_by_text(args.text, exact=False).first.wait_for(timeout=args.timeout * 1000)
+    elif args.command == "upload":
+        # A native file dialog cannot be driven by keystrokes at all; the file
+        # is set straight into the input.
+        browser.locate(args.target).set_input_files(args.path)
+    elif args.command == "snap":
+        pass  # capture only — the reporting below does the work
+    else:  # pragma: no cover - argparse rejects anything else first
+        raise SystemExit(f"[drive] unknown action {args.command!r}")
+
+
+# -- CLI ----------------------------------------------------------------------
+
+ACTIONS = ("open", "click", "fill", "type", "press", "back", "reload",
+           "wait", "upload", "snap")
+
+
+def do_action(args: argparse.Namespace) -> int:
+    root = args.evidence_root
+    run = load(root)
+    try:
+        run.charge()
+    except Exhausted as exc:
+        print(f"[drive] {exc}", file=sys.stderr)
+        return 2
+
+    browser = _Browser(run.cdp)
+    try:
+        act(browser, args)
+        # The tree is read AFTER the action and BEFORE anything else, so what
+        # the agent sees is the page the action produced.
+        tree = browser.tree()
+        name = shot_name(run, getattr(args, "name", "") or args.command)
+        browser.shot(evidence_dir(root, run.milestone) / name)
+    finally:
+        browser.close()
+        save(root, run)
+
+    print(tree)
+    print()
+    print(f"[drive] screen:{name} · action {run.actions}/{run.max_actions} · "
+          f"{run.elapsed_minutes:.0f}/{run.minutes} min")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="aikit acceptance hands")
+    parser.add_argument("--evidence-root", dest="evidence_root", type=pathlib.Path,
+                        default=pathlib.Path(".acceptance"))
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    begin = sub.add_parser("begin", help="start a run and set its budget")
+    begin.add_argument("milestone")
+    begin.add_argument("--max-actions", type=int, default=DEFAULT_MAX_ACTIONS)
+    begin.add_argument("--minutes", type=int, default=DEFAULT_MINUTES)
+    begin.add_argument("--cdp", default=DEFAULT_CDP)
+
+    opened = sub.add_parser("open", help="open an address")
+    opened.add_argument("url")
+
+    click = sub.add_parser("click", help="click an element")
+    click.add_argument("target", help="role=name | css=selector | text=visible text")
+
+    fill = sub.add_parser("fill", help="set a field's value in one go")
+    fill.add_argument("target")
+    fill.add_argument("text")
+
+    typed = sub.add_parser("type", help="type with real keystrokes")
+    typed.add_argument("target")
+    typed.add_argument("text")
+
+    press = sub.add_parser("press", help="press a key (Enter, Escape, Tab…)")
+    press.add_argument("key")
+
+    sub.add_parser("back", help="the browser's back button")
+    sub.add_parser("reload", help="reload the page")
+
+    wait = sub.add_parser("wait", help="wait for text to appear")
+    wait.add_argument("text")
+    wait.add_argument("--timeout", type=int, default=20, help="seconds")
+
+    upload = sub.add_parser("upload", help="put a file into a file input")
+    upload.add_argument("target", help="usually `css=input[type=file]`")
+    upload.add_argument("path")
+
+    sub.add_parser("snap", help="capture tree and screenshot without acting")
+    sub.add_parser("end", help="finish the run")
+
+    for name in ACTIONS:
+        sub.choices[name].add_argument("--name", default="", help="name for the screenshot")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    root = args.evidence_root
+
+    if args.command == "begin":
+        run = Run(milestone=args.milestone, cdp=args.cdp, started=time.time(),
+                  max_actions=args.max_actions, minutes=args.minutes)
+        evidence_dir(root, run.milestone).mkdir(parents=True, exist_ok=True)
+        save(root, run)
+        print(f"[drive] run {run.milestone} started · budget {run.max_actions} actions, "
+              f"{run.minutes} min · browser {run.cdp}")
+        return 0
+
+    if args.command == "end":
+        run = load(root)
+        state_path(root).unlink(missing_ok=True)
+        print(f"[drive] run {run.milestone} finished · spent {run.actions} actions, "
+              f"{run.elapsed_minutes:.0f} min")
+        return 0
+
+    return do_action(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

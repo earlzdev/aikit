@@ -1,0 +1,488 @@
+#!/usr/bin/env python3
+"""aikit acceptance gate: parse an acceptance report and say whether it may merge.
+
+WHAT: Reads `<evidence>/<milestone>/verdict.json`, reads the owner's lifted
+      findings from the tracker, prints the verdict text and returns 0 (may
+      merge) or 1 (blocked).
+
+WHY it is a program and not a paragraph in a skill.
+      The acceptance phase asks the agent for three things it is most willing
+      to skip: evidence attached to every claim, a mandatory "what I could not
+      check" line, and five probes beyond the checklist. "Overall it works" is
+      always the cheaper sentence to write. An instruction asking for them
+      politely holds until the first long run. A non-zero exit code holds
+      always. So A DEFECTIVE REPORT BLOCKS EXACTLY LIKE A BREAKAGE does:
+      an acceptance run that never looked at the database has not earned the
+      right to say "good".
+
+      Two of the three finding classes block; "works, but awkward" does not.
+      A gate where everything blocks becomes a gate nobody runs.
+
+      Only the OWNER can lift a block, and lifting is written down. The escape
+      hatch is mandatory because an acceptance agent does get things wrong —
+      did not scroll, did not find the button — and without a way out one
+      hallucination freezes the work until morning. The written record is
+      mandatory for the opposite reason: it is the only way to see how often
+      that happens.
+
+HOW:  no third-party imports and no config file on purpose — the skill reads
+      `aikit.yml` and passes what it found as flags. A binary that parsed YAML
+      would need a dependency and would couple the gate to the config's shape.
+
+    verdict template e52 > .acceptance/e52/verdict.json
+    verdict gate e52
+    verdict gate e52 --write --lang ru
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import pathlib
+import re
+import sys
+from dataclasses import dataclass, field
+from typing import Any
+
+# -- the vocabulary -----------------------------------------------------------
+
+# Machine keys, stable across languages. What the owner reads is looked up in
+# LABELS; what the report file carries is one of these three. Accepting a
+# localized word as input too (ALIASES) is deliberate: reports written before
+# aikit existed are in Russian and must keep parsing.
+BROKEN = "broken"
+LIES = "lies"
+CLUMSY = "clumsy"
+CLASSES = (BROKEN, LIES, CLUMSY)
+BLOCKING = (BROKEN, LIES)
+
+# The five probes nothing in a specification asks for, and where the bugs
+# actually live: focus lost after each keystroke, "please wait" where there is
+# nothing to wait for, a lead with no recipient. A checklist cannot catch them
+# by construction — it lists what should exist — so they are asked separately
+# and a missing answer makes the report defective.
+PROBES = (
+    "empty_field",
+    "very_long_text",
+    "double_click",
+    "abandon_midway",
+    "browser_back",
+)
+
+# Evidence is a screenshot or a row from the database. The prefix is required
+# so that "checked, works" cannot be typed into an evidence field as-is.
+SCREEN = "screen:"
+DB = "db:"
+
+LABELS: dict[str, dict[str, str]] = {
+    "en": {
+        BROKEN: "does not work",
+        LIES: "works, but lies",
+        CLUMSY: "works, but awkward",
+        "empty_field": "empty field",
+        "very_long_text": "very long text",
+        "double_click": "double click",
+        "abandon_midway": "abandoned midway",
+        "browser_back": "browser back button",
+        "verdict": "Verdict",
+        "good": "GOOD — may merge",
+        "blocked": "BLOCKED",
+        "blockers": "Blocking findings",
+        "advisory": "For the owner (not blocking)",
+        "defects": "Report defects",
+        "lifted": "Lifted by the owner",
+        "not_checked": "Could not check",
+        "spend": "Spend",
+        "round": "round",
+        "actions": "actions",
+        "minutes": "minutes",
+        "override_prefix": "lifted by owner:",
+    },
+    "ru": {
+        BROKEN: "не работает",
+        LIES: "работает, но врёт",
+        CLUMSY: "работает, но неудобно",
+        "empty_field": "пустое поле",
+        "very_long_text": "очень длинный текст",
+        "double_click": "двойное нажатие",
+        "abandon_midway": "отказ на полпути",
+        "browser_back": "кнопка назад",
+        "verdict": "Вердикт",
+        "good": "ГОДИТСЯ — можно мержить",
+        "blocked": "ЗАБЛОКИРОВАНО",
+        "blockers": "Находки, держащие мерж",
+        "advisory": "Владельцу (не блокирует)",
+        "defects": "Дефекты отчёта",
+        "lifted": "Снято владельцем",
+        "not_checked": "Чего проверить не смог",
+        "spend": "Расход",
+        "round": "круг",
+        "actions": "действий",
+        "minutes": "минут",
+        "override_prefix": "снято владельцем:",
+    },
+}
+
+# Localized words accepted in the report's `class` field, mapped back to the
+# machine key. Reports written before aikit existed keep working.
+ALIASES = {
+    "не работает": BROKEN,
+    "работает, но врёт": LIES,
+    "врёт": LIES,
+    "работает, но неудобно": CLUMSY,
+    "неудобно": CLUMSY,
+    "does not work": BROKEN,
+    "broken": BROKEN,
+    "lies": LIES,
+    "clumsy": CLUMSY,
+}
+
+# Probe keys accepted from a report, localized or machine.
+PROBE_ALIASES = {label: key for lang in LABELS.values()
+                 for key, label in lang.items() if key in PROBES}
+PROBE_ALIASES.update({key: key for key in PROBES})
+
+
+def label(lang: str, key: str) -> str:
+    return LABELS.get(lang, LABELS["en"]).get(key, LABELS["en"].get(key, key))
+
+
+class BadReport(ValueError):
+    """The report does not parse. The message is shown to the author as-is."""
+
+
+@dataclass(frozen=True)
+class Finding:
+    klass: str
+    what: str
+    where: str
+    evidence: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class Item:
+    """One line of the milestone's "done when" checklist, and its fate."""
+
+    item: str
+    passed: bool
+    evidence: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class Report:
+    milestone: str
+    round: int
+    checklist: tuple[Item, ...]
+    findings: tuple[Finding, ...]
+    not_checked: str
+    probes: dict[str, str]
+    spend: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class Decision:
+    blocked: bool
+    blockers: tuple[Finding, ...]
+    lifted: tuple[Finding, ...]
+    defects: tuple[str, ...]
+    advisory: tuple[Finding, ...]
+
+
+# -- parsing ------------------------------------------------------------------
+
+def _strs(raw: Any, where: str) -> tuple[str, ...]:
+    if raw is None:
+        return ()
+    if not isinstance(raw, list) or any(not isinstance(x, str) for x in raw):
+        raise BadReport(f"{where}: expected a list of strings")
+    return tuple(x.strip() for x in raw if x.strip())
+
+
+def parse(data: Any) -> Report:
+    """Strict on purpose: the report is a protocol between the acceptance agent
+    and this gate, and a field swallowed quietly here is a check not made."""
+    if not isinstance(data, dict):
+        raise BadReport("the report must be a JSON object")
+
+    milestone = str(data.get("milestone", "")).strip()
+    if not milestone:
+        raise BadReport("no milestone named (`milestone`)")
+
+    try:
+        rnd = int(data.get("round", 1))
+    except (TypeError, ValueError):
+        raise BadReport("`round` must be a number") from None
+
+    raw_checklist = data.get("checklist")
+    if not isinstance(raw_checklist, list) or not raw_checklist:
+        raise BadReport("`checklist` is empty: the \"done when\" block was not walked")
+    checklist = []
+    for i, raw in enumerate(raw_checklist):
+        if not isinstance(raw, dict):
+            raise BadReport(f"checklist[{i}]: expected an object")
+        item = str(raw.get("item", "")).strip()
+        if not item:
+            raise BadReport(f"checklist[{i}]: no `item` text")
+        checklist.append(Item(item=item,
+                              passed=bool(raw.get("passed")),
+                              evidence=_strs(raw.get("evidence"), f"checklist[{i}].evidence")))
+
+    findings = []
+    for i, raw in enumerate(data.get("findings") or []):
+        if not isinstance(raw, dict):
+            raise BadReport(f"findings[{i}]: expected an object")
+        klass = ALIASES.get(str(raw.get("class", "")).strip().lower())
+        if klass is None:
+            raise BadReport(
+                f"findings[{i}]: unknown class {raw.get('class')!r} — "
+                f"expected one of {', '.join(CLASSES)}"
+            )
+        what = str(raw.get("what", "")).strip()
+        if not what:
+            raise BadReport(f"findings[{i}]: no `what` text")
+        findings.append(Finding(klass=klass, what=what,
+                                where=str(raw.get("where", "")).strip(),
+                                evidence=_strs(raw.get("evidence"), f"findings[{i}].evidence")))
+
+    probes: dict[str, str] = {}
+    for key, value in (data.get("beyond_checklist") or {}).items():
+        canonical = PROBE_ALIASES.get(str(key).strip().lower())
+        if canonical:
+            probes[canonical] = str(value).strip()
+
+    return Report(
+        milestone=milestone,
+        round=rnd,
+        checklist=tuple(checklist),
+        findings=tuple(findings),
+        not_checked=str(data.get("not_checked", "")).strip(),
+        probes=probes,
+        spend=data.get("spend") or {},
+    )
+
+
+# -- overrides ----------------------------------------------------------------
+
+# `- lifted by owner: <finding text verbatim> — <reason>`. Both languages'
+# prefixes are accepted regardless of --lang: a project that switches its
+# owner-facing language must not invalidate blocks lifted last month.
+_PREFIXES = tuple(lang["override_prefix"] for lang in LABELS.values())
+_OVERRIDE_LINE = re.compile(
+    r"^\s*-\s*(?:%s)\s*(?P<what>.+?)\s*(?:[—-]\s.*)?$"
+    % "|".join(re.escape(p) for p in _PREFIXES),
+    re.IGNORECASE,
+)
+
+
+def read_overrides(path: pathlib.Path) -> tuple[str, ...]:
+    """Findings the owner has explicitly waved through, by their verbatim text."""
+    if not path.is_file():
+        return ()
+    out = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        match = _OVERRIDE_LINE.match(line)
+        if match:
+            out.append(match.group("what").strip())
+    return tuple(out)
+
+
+# -- the gate itself ----------------------------------------------------------
+
+def defects(report: Report, *, require_db: bool = True) -> tuple[str, ...]:
+    """Everything that makes the report itself unusable, regardless of findings.
+
+    A report with holes cannot support a "good" verdict, so these block just
+    like a breakage does — see this module's docstring.
+    """
+    out: list[str] = []
+
+    if not report.not_checked:
+        out.append(
+            'the mandatory "what I could not check and why" line is missing — '
+            "its absence reads as a full run, and a full run is rare"
+        )
+
+    missing = [p for p in PROBES if not report.probes.get(p)]
+    if missing:
+        out.append("probes beyond the checklist with no answer: " + ", ".join(missing))
+
+    for item in report.checklist:
+        if item.passed and not item.evidence:
+            out.append(f'checklist item marked passed with no evidence: "{item.item}"')
+
+    everything = [e for item in report.checklist for e in item.evidence]
+    everything += [e for f in report.findings for e in f.evidence]
+    if not any(e.startswith(SCREEN) for e in everything):
+        out.append(f"not one `{SCREEN}` piece of evidence in the whole report")
+    if require_db and not any(e.startswith(DB) for e in everything):
+        out.append(
+            f"not one `{DB}` row in the whole report — a run that never looked at "
+            "the data cannot tell working from working-but-lying"
+        )
+
+    return tuple(out)
+
+
+def gate(report: Report, *, overrides: tuple[str, ...] = (),
+         require_db: bool = True) -> Decision:
+    lifted, blockers = [], []
+    for finding in report.findings:
+        if finding.klass not in BLOCKING:
+            continue
+        (lifted if finding.what in overrides else blockers).append(finding)
+
+    found = defects(report, require_db=require_db)
+    return Decision(
+        blocked=bool(blockers or found),
+        blockers=tuple(blockers),
+        lifted=tuple(lifted),
+        defects=found,
+        advisory=tuple(f for f in report.findings if f.klass == CLUMSY),
+    )
+
+
+# -- rendering ----------------------------------------------------------------
+
+def _finding_line(finding: Finding, lang: str) -> str:
+    where = f" ({finding.where})" if finding.where else ""
+    evidence = f" [{', '.join(finding.evidence)}]" if finding.evidence else ""
+    return f"- **{label(lang, finding.klass)}** — {finding.what}{where}{evidence}"
+
+
+def render(report: Report, decision: Decision, lang: str = "en") -> str:
+    head = label(lang, "blocked") if decision.blocked else label(lang, "good")
+    lines = [
+        f"# {label(lang, 'verdict')} · {report.milestone} · "
+        f"{label(lang, 'round')} {report.round}: {head}",
+        "",
+    ]
+
+    if decision.blockers:
+        lines += [f"## {label(lang, 'blockers')}", ""]
+        lines += [_finding_line(f, lang) for f in decision.blockers] + [""]
+
+    if decision.defects:
+        lines += [f"## {label(lang, 'defects')}", ""]
+        lines += [f"- {d}" for d in decision.defects] + [""]
+
+    if decision.lifted:
+        lines += [f"## {label(lang, 'lifted')}", ""]
+        lines += [_finding_line(f, lang) for f in decision.lifted] + [""]
+
+    if decision.advisory:
+        lines += [f"## {label(lang, 'advisory')}", ""]
+        lines += [_finding_line(f, lang) for f in decision.advisory] + [""]
+
+    lines += [
+        f"## {label(lang, 'not_checked')}",
+        "",
+        report.not_checked or "—",
+        "",
+    ]
+
+    spend = report.spend or {}
+    lines.append(
+        f"{label(lang, 'spend')}: {spend.get('actions', '?')} "
+        f"{label(lang, 'actions')}, {spend.get('minutes', '?')} "
+        f"{label(lang, 'minutes')}."
+    )
+    return "\n".join(lines) + "\n"
+
+
+# -- CLI ----------------------------------------------------------------------
+
+TEMPLATE: dict[str, Any] = {
+    "milestone": "<milestone>",
+    "round": 1,
+    "checklist": [
+        {
+            "item": "<one line of the milestone's \"done when\" block, verbatim>",
+            "passed": True,
+            "evidence": ["screen:007-saved.png", "db:SELECT … → 1 row, config updated"],
+        }
+    ],
+    # Empty, filled by the run. The example alongside shows the shape; the
+    # skeleton passes the gate as-is on purpose — a contract handed to an agent
+    # must be self-consistent, or the first run fights the parser instead of
+    # the feature.
+    "findings": [],
+    "_example_finding": {
+        "class": BROKEN,
+        "what": "<what is wrong, in a human's words>",
+        "where": "<where exactly: screen, button, address>",
+        "evidence": ["screen:012-after-click.png"],
+    },
+    "beyond_checklist": dict.fromkeys(PROBES, "<what happened>"),
+    "not_checked": "<what you could not check and why — this line is mandatory>",
+    "spend": {"actions": 0, "minutes": 0},
+}
+
+
+def verdict_path(milestone: str, root: pathlib.Path) -> pathlib.Path:
+    return root / milestone / "verdict.json"
+
+
+def override_path(milestone: str, tracker: pathlib.Path) -> pathlib.Path:
+    return tracker / milestone / "acceptance-override.md"
+
+
+def run_gate(milestone: str, *, write: bool, tracker: pathlib.Path,
+             root: pathlib.Path, lang: str, require_db: bool) -> int:
+    path = verdict_path(milestone, root)
+    if not path.is_file():
+        # No report is "could not", never "good". A run that did not happen
+        # never signs off on anything.
+        print(f"[verdict] no {path}: the acceptance run left no report. "
+              f'That is "could not", not "good".', file=sys.stderr)
+        return 1
+    try:
+        report = parse(json.loads(path.read_text(encoding="utf-8")))
+    except (json.JSONDecodeError, BadReport) as exc:
+        print(f"[verdict] the report does not parse: {exc}", file=sys.stderr)
+        return 1
+
+    decision = gate(report,
+                    overrides=read_overrides(override_path(milestone, tracker)),
+                    require_db=require_db)
+    text = render(report, decision, lang)
+    print(text)
+    if write:
+        out = tracker / milestone / "acceptance.md"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(text, encoding="utf-8")
+        print(f"[verdict] written to {out}", file=sys.stderr)
+    return 1 if decision.blocked else 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="aikit acceptance gate")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    gated = sub.add_parser("gate", help="0 — may merge, 1 — blocked")
+    gated.add_argument("milestone")
+    gated.add_argument("--write", action="store_true",
+                       help="also write the verdict text into the milestone's tracker")
+    gated.add_argument("--tracker", type=pathlib.Path, default=pathlib.Path("docs/tracker"))
+    gated.add_argument("--evidence-root", dest="root", type=pathlib.Path,
+                       default=pathlib.Path(".acceptance"))
+    gated.add_argument("--lang", default="en", choices=sorted(LABELS))
+    gated.add_argument("--no-db", dest="require_db", action="store_false",
+                       help="the project has no database the acceptance role can read")
+
+    template = sub.add_parser("template", help="empty report skeleton on stdout")
+    template.add_argument("milestone")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    if args.command == "template":
+        print(json.dumps(dict(TEMPLATE, milestone=args.milestone),
+                         ensure_ascii=False, indent=2))
+        return 0
+    return run_gate(args.milestone, write=args.write, tracker=args.tracker,
+                    root=args.root, lang=args.lang, require_db=args.require_db)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

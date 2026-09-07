@@ -1,0 +1,51 @@
+# The smallest useful configuration: three zones, one Makefile, no acceptance.
+#
+# Leaving the `acceptance` block out is not a degraded setup — it is the right
+# configuration for a project with no interface to walk. The phase simply does
+# not exist, and `autopilot` closes milestones after review-loop and the
+# project's own verification.
+version: 1
+
+language: en
+
+plan:
+  path: docs/PLAN.md
+  markers:
+    milestone: "^##+\\s"
+    done_when: "Done when"
+    acceptance: "acceptance"
+    yes: "yes"
+    no: "no"
+
+tracker: docs/tracker
+evidence: .acceptance
+
+zones:
+  - key: control
+    label: "Control plane"
+    paths: ["control/**", "tests/control/**"]
+    rulebook: .claude/projects/01-control-rulebook.md
+    verify: "make test-control"
+  - key: edge
+    label: "Edge nodes"
+    paths: ["edge/**", "tests/edge/**"]
+    rulebook: .claude/projects/02-edge-rulebook.md
+    verify: "make test-edge"
+  - key: infra
+    label: "Deploy, CI, scripts"
+    paths: ["deploy/**", ".github/**", "Makefile", "scripts/**"]
+    rulebook: .claude/projects/04-infra-rulebook.md
+    verify: "make test-infra"
+
+verify_all: "make test-control && make test-edge && make test-infra"
+
+review:
+  reviewer: reviewer-strict
+  rounds:
+    develop: 3
+    fix: 2
+
+git:
+  main: main
+  branch_prefix: "task/"
+  pr: true

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://code.claude.com/schemas/marketplace.json",
+  "name": "aikit",
+  "description": "Unattended delivery pipeline for Claude Code",
+  "owner": { "name": "earlzdev", "url": "https://github.com/earlzdev" },
+  "plugins": [
+    {
+      "name": "aikit",
+      "source": "./",
+      "description": "Plan into milestones, review every step with an agent that cannot edit, accept every milestone with an agent that never sees the diff. Configured per project by one aikit.yml instead of copied templates.",
+      "category": "workflow",
+      "keywords": ["pipeline", "autonomous", "review", "acceptance", "milestones"],
+      "license": "MIT",
+      "repository": "https://github.com/earlzdev/aikit"
+    }
+  ]
+}

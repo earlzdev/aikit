@@ -1,0 +1,75 @@
+# A web product with an acceptance phase.
+#
+# Shape taken from a real project running this pipeline: three zones with
+# different toolchains, a plan written in Russian, a disposable stand layered
+# on the existing e2e stack. Hostnames and paths here are placeholders.
+version: 1
+
+language: ru
+
+plan:
+  path: docs/PLAN.md
+  markers:
+    milestone: "^##+\\s"
+    done_when: "Готово, когда"
+    acceptance: "приёмка"
+    yes: "да"
+    no: "нет"
+
+tracker: docs/tracker
+evidence: .acceptance
+
+zones:
+  - key: backend
+    label: "API, worker, database, platform core"
+    paths: ["modules/**", "core/**", "connectors/**", "shared/**", "migrations/**"]
+    rulebook: .claude/projects/01-backend-rulebook.md
+    verify: "uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest -q"
+  - key: web
+    label: "React + TypeScript admin apps"
+    paths: ["admin/web/**"]
+    rulebook: .claude/projects/04-web-rulebook.md
+    verify: "cd admin/web && npm ci && npm run check"
+  - key: infra
+    label: "compose, perimeter, observability"
+    paths: ["deploy/**", "docker-compose.yml", "Dockerfile"]
+    rulebook: .claude/projects/02-infra-rulebook.md
+    verify: "docker compose -f docker-compose.yml config -q"
+
+verify_all: >-
+  uv run ruff check . && uv run ruff format --check . && uv run mypy &&
+  uv run pytest -q && docker compose -f docker-compose.yml config -q
+
+review:
+  reviewer: reviewer-strict
+  rounds:
+    develop: 3
+    fix: 2
+
+acceptance:
+  rounds: 3
+  budget:
+    actions: 120
+    minutes: 45
+  stand:
+    up: "scripts/acceptance/stand.sh up"
+    down: "scripts/acceptance/stand.sh down"
+  query: "scripts/acceptance/query.py"
+  # This project's browser lives inside the stand's network namespace — the
+  # only place `localhost` and a valid Origin mean the right thing — so it
+  # keeps its own driver instead of aikit's.
+  drive: "scripts/acceptance/drive.py"
+  entrypoints:
+    - name: "Landing"
+      url: "http://localhost/"
+    - name: "Owner admin"
+      url: "http://admin.example.test/"
+      note: "the stand prints its sign-in token on startup"
+    - name: "Customer cabinet"
+      url: "http://customer.example.test/"
+  seed: "an empty customer named `acceptance`, with a small token ceiling"
+
+git:
+  main: develop        # work lands here by PR; the release branch is the owner's
+  branch_prefix: "task/"
+  pr: true
