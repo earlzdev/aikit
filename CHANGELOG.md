@@ -2,6 +2,16 @@
 
 Newest first. What changed, and why.
 
+## 0.1.1 — 2026-09-08
+
+- **Dropped `commands/`.** A command and a skill sharing a name both register
+  under `/aikit:`, so the picker showed `/aikit:autopilot` twice (and `init`
+  and `plan` likewise). The commands only forwarded `$ARGUMENTS`, which skills
+  already take, so the skills are now the single entry point. The two nudges
+  that lived only in a command file moved into the skill they belonged to:
+  what to do when `plan` is invoked with nothing to plan, and that anything
+  the owner said when invoking `init` is an answer already given.
+
 ## 0.1.0 — 2026-09-07
 
 First release. The pipeline extracted from a project that had grown it in

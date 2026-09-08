@@ -108,7 +108,9 @@ default of "no".
 ## Producing a plan
 
 1. Read the existing `plan.path` if there is one — the numbering, the wording
-   and the conventions in it beat anything suggested here.
+   and the conventions in it beat anything suggested here. If you were given
+   nothing to plan, read that file and ask the owner what comes next. Never
+   invent a plan for a project that did not ask for one.
 2. Ask whatever you genuinely cannot infer. Scope, ordering and the acceptance
    line are the owner's; structure is yours.
 3. Write the milestones. For each: the prose with reasoning, the steps, the

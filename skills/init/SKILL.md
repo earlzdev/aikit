@@ -36,7 +36,8 @@ sitting in `Makefile` wastes the owner's attention on the wrong questions.
 
 ## 2. Then ask, only what is left
 
-Batch the questions. Typically:
+Anything the owner already said when invoking this counts as an answer given —
+do not ask it again. Batch what remains. Typically:
 
 - Anything you could not infer about zones or verify commands.
 - Round caps, if the owner wants something other than 3 for development and 2

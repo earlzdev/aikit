@@ -56,11 +56,11 @@ It reads the repo, asks only what it cannot infer, writes one `aikit.yml`, and
 /aikit:autopilot                 # run the pipeline until done or genuinely blocked
 ```
 
-or a single piece on its own:
+or a single piece on its own — each skill is invocable by name:
 
 ```
-/aikit:review <task>             # do it, then loop an independent reviewer
-/aikit:accept <milestone>        # walk a finished milestone by hand
+/aikit:review-loop <task>        # do it, then loop an independent reviewer
+/aikit:acceptance-loop <n>       # walk a finished milestone by hand
 ```
 
 ## One config, not copied templates
@@ -94,7 +94,6 @@ Full reference: [`docs/config.md`](docs/config.md). Worked examples:
 skills/     init · plan · review-loop · acceptance-loop · autopilot
 agents/     reviewer-strict · acceptance
 bin/        verdict (the gate) · drive (browser hands)
-commands/   /aikit:init /aikit:plan /aikit:autopilot /aikit:review /aikit:accept
 ```
 
 `bin/verdict` is dependency-free Python and unit-tested — it is the piece that
