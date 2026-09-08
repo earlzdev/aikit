@@ -2,15 +2,24 @@
 
 Newest first. What changed, and why.
 
-## 0.1.1 — 2026-09-08
+## 0.2.2 — 2026-09-08
 
-- **Dropped `commands/`.** A command and a skill sharing a name both register
-  under `/aikit:`, so the picker showed `/aikit:autopilot` twice (and `init`
-  and `plan` likewise). The commands only forwarded `$ARGUMENTS`, which skills
-  already take, so the skills are now the single entry point. The two nudges
-  that lived only in a command file moved into the skill they belonged to:
-  what to do when `plan` is invoked with nothing to plan, and that anything
-  the owner said when invoking `init` is an answer already given.
+- **`bin/drive` was broken and is now fixed.** Playwright removed
+  `page.accessibility` in 1.62, so every action after `begin` died on
+  `AttributeError`. It uses `page.aria_snapshot()` now — which already returns
+  an indented role/name outline — and falls back to the old API so a project
+  pinning an older Playwright is not forced to upgrade. Found by running it
+  against a real Chromium for the first time, which is the only way this class
+  of bug is ever found.
+- **The 0.2.1 tripwire had a false positive that would have voided every real
+  run.** It fingerprinted `git status`, and *using* a product mutates a
+  repository — the first live run tripped on a `.pyc` the test suite wrote. The
+  fingerprint now takes `--tree-ignore` (a bare name matches any path
+  component, so `__pycache__` catches it at any depth) and the defect names the
+  paths that moved, so a block says which file and is actionable instead of
+  mysterious. Config key: `acceptance.tripwire_ignore`.
+- **The changelog was out of order**, with shipped work filed under
+  "Unreleased". Rewritten newest-first.
 
 ## 0.2.1 — 2026-09-08
 
@@ -40,8 +49,15 @@ Newest first. What changed, and why.
   with the two guarantees that get weaker there written down rather than
   discovered: resource ids leak developer names, and `adb shell` can write.
 
-## Unreleased
+## 0.1.1 — 2026-09-08
 
+- **Dropped `commands/`.** A command and a skill sharing a name both register
+  under `/aikit:`, so the picker showed `/aikit:autopilot` twice (and `init`
+  and `plan` likewise). The commands only forwarded `$ARGUMENTS`, which skills
+  already take, so the skills are now the single entry point. The two nudges
+  that lived only in a command file moved into the skill they belonged to:
+  what to do when `plan` is invoked with nothing to plan, and that anything
+  the owner said when invoking `init` is an answer already given.
 - **`docs/pipeline.html`** — an animated trace of one task through the pipeline.
   Round one fails on purpose, in both loops: an animation of a clean
   straight-through run would misrepresent the thing, because the loop is the

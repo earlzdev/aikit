@@ -97,6 +97,10 @@ acceptance:
       url: "http://admin.example.test/"
       note: "sign in with the stand token in the stand's output"
   seed: "an empty client with a small token cap"
+  # Generated files this project TRACKS, which running it will touch. Anything
+  # already gitignored never counts. Leave empty unless a run trips the gate on
+  # a file nobody edited — `verdict tree --show` names what is dirty.
+  tripwire_ignore: ["__pycache__", "*.pyc"]
 
 git:
   main: main
@@ -127,6 +131,11 @@ database role*, not merely by instruction. This is what separates "works"
 from "works, but lies", and an acceptance agent that could write a row would
 one day help itself to one instead of reporting that the button didn't
 create it.
+
+**`acceptance.tripwire_ignore`** — the acceptance agent holds editing tools, so
+the gate checks the repository did not move during its run. Using a product
+mutates a repository, though: this is the list of generated paths that do not
+count. Keep it short. Every entry here is a place the tripwire stops watching.
 
 **`acceptance.entrypoints`** — addresses and human-facing notes only. If a
 reader could learn from this block WHICH FILES changed, it is over-specified

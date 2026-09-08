@@ -91,8 +91,15 @@ report it and stop. Do not proceed to merge.
 **Fingerprint the working tree before you spawn anything:**
 
 ```
-"$CLAUDE_PLUGIN_ROOT/bin/verdict" tree      # record this digest
+"$CLAUDE_PLUGIN_ROOT/bin/verdict" tree [--tree-ignore <glob>]…   # record this digest
 ```
+
+Pass `acceptance.tripwire_ignore` from `aikit.yml` as `--tree-ignore`. Using a
+product mutates a repository — bytecode, build output, logs — and a run that
+edited nothing must not be called void because the test suite wrote a `.pyc`.
+Anything git already ignores never counts; this is for generated files a
+project happens to track. `verdict tree --show` lists what is currently dirty
+if you need to work out what to exclude.
 
 The acceptance agent holds every tool this project has, editing tools included.
 "You only report, the author fixes" is an instruction it could talk itself out
@@ -129,7 +136,9 @@ The gate is mechanical and returns non-zero in three cases:
   one screenshot or not one database row;
 - **the working tree moved during the run** — or could not be fingerprinted at
   all, which fails closed for the same reason a stand that did not come up is
-  "could not" and never "good".
+  "could not" and never "good". The defect names the paths that moved, so a
+  block is always actionable: either the agent edited what it was judging, or
+  a generated file belongs in `tripwire_ignore`.
 
 None of the three can be lifted by an owner override except a finding: an
 incomplete run and a void run are not opinions to disagree with.

@@ -131,11 +131,21 @@ stack that is not a browser at all. The agent holds every tool the project has;
 
 ## Status
 
-`0.1.0`. The gate, the budgets and the report parsing are unit-tested (55
-tests, stdlib only). `bin/drive`'s Playwright layer has **not** been exercised
-against a live browser — the logic around it is tested, the browser calls are
-not. Projects with an existing driver should keep it (`acceptance.hands`) until
-that changes.
+`0.2.2`. Verified against a real project, not only in unit tests:
+
+- **`bin/verdict`** — 61 unit tests, plus an end-to-end pass in a scratch git
+  repo covering all fifteen gate paths: blocking findings, every report defect,
+  the owner override, `--no-db`, and the working-tree tripwire — including that
+  a gitignored evidence directory does *not* trip it, that a test suite writing
+  bytecode does not either, and that a real source edit does.
+- **`bin/drive`** — driven against a live headless Chromium: opens a page,
+  reads back an accessibility tree, types and clicks by role, and refuses once
+  the action budget is spent.
+- **The skills and agents** are written procedure, not code. `reviewer-strict`
+  has been run on a real diff; the rest is exercised by using it.
+
+Two guarantees are hard — the reviewer has no editing tool in its process, and
+the gate's exit code is a number. Everything else is procedure a model follows.
 
 ## Licence
 

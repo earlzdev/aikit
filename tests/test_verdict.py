@@ -244,22 +244,32 @@ class TestWorkingTree(unittest.TestCase):
     "You only report" is an instruction, so the gate checks rather than trusts."""
 
     def test_unchanged_tree_is_no_defect(self):
-        self.assertEqual(v.defects(report(), tree=("abc123", "abc123")), ())
+        self.assertEqual(v.defects(report(), tree=("abc123", "abc123", ())), ())
 
     def test_changed_tree_blocks(self):
-        decision = v.gate(report(), tree=("abc123", "def456"))
+        decision = v.gate(report(), tree=("abc123", "def456", ("src/cart.py",)))
         self.assertTrue(decision.blocked)
         self.assertTrue(any("changed during the acceptance run" in d for d in decision.defects))
 
+    def test_the_defect_names_what_moved(self):
+        """"The tree moved" that cannot say what moved is a block nobody can act on."""
+        decision = v.gate(report(), tree=("a", "b", ("src/cart.py", "src/tax.py")))
+        self.assertTrue(any("src/cart.py" in d and "src/tax.py" in d for d in decision.defects))
+
+    def test_many_moved_paths_are_truncated(self):
+        paths = tuple(f"f{i}.py" for i in range(9))
+        decision = v.gate(report(), tree=("a", "b", paths))
+        self.assertTrue(any("…" in d for d in decision.defects))
+
     def test_unfingerprintable_tree_fails_closed(self):
         """A check that could not run is not a check that passed."""
-        decision = v.gate(report(), tree=("abc123", ""))
+        decision = v.gate(report(), tree=("abc123", "", ()))
         self.assertTrue(decision.blocked)
         self.assertTrue(any("could not be fingerprinted" in d for d in decision.defects))
 
     def test_owner_override_cannot_lift_a_changed_tree(self):
         """An owner may disagree with a finding. A void run is not a finding."""
-        decision = v.gate(report(), tree=("abc123", "def456"), overrides=("anything",))
+        decision = v.gate(report(), tree=("abc123", "def456", ("x.py",)), overrides=("anything",))
         self.assertTrue(decision.blocked)
 
     def test_no_tree_argument_means_no_check(self):
@@ -270,3 +280,30 @@ class TestWorkingTree(unittest.TestCase):
         a, b = v.tree_digest(ROOT), v.tree_digest(ROOT)
         self.assertEqual(a, b)
         self.assertEqual(len(a), 16)
+
+
+class TestTreeIgnore(unittest.TestCase):
+    """Using a product mutates a repository. Found the first time this ran for
+    real: a reviewer ran the suite, Python wrote a .pyc, and a run that edited
+    nothing was called void."""
+
+    def test_bare_name_matches_any_component(self):
+        self.assertTrue(v._matches("src/__pycache__/cart.pyc", "__pycache__"))
+        self.assertTrue(v._matches("__pycache__/x.pyc", "__pycache__"))
+
+    def test_bare_name_does_not_match_a_substring(self):
+        self.assertFalse(v._matches("src/cache/x.py", "__pycache__"))
+
+    def test_a_glob_with_a_slash_matches_the_whole_path(self):
+        self.assertTrue(v._matches("build/out.js", "build/*"))
+        self.assertFalse(v._matches("src/build/out.js", "build/*"))
+
+    def test_extension_glob(self):
+        self.assertTrue(v._matches("src/a/b.pyc", "*.pyc"))
+
+    def test_ignoring_changes_the_digest_it_reports(self):
+        """The ignore list must actually reach the fingerprint, not just the
+        message — otherwise a run is still voided by a stray .pyc."""
+        plain = v.tree_digest(ROOT)
+        wide = v.tree_digest(ROOT, ignore=("*",))
+        self.assertNotEqual(plain, wide) if v.tree_state(ROOT)[1] else self.assertEqual(plain, wide)

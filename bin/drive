@@ -220,8 +220,24 @@ class _Browser:
         return self.page.get_by_role(kind, name=value).first
 
     def tree(self) -> str:
-        snapshot = self.page.accessibility.snapshot()
-        return truncate_tree("\n".join(flatten(snapshot)) or "(empty tree)")
+        """Roles and labels, whichever API this Playwright still has.
+
+        `page.accessibility` was removed in Playwright 1.62; `aria_snapshot()`
+        replaces it and already returns an indented role/name outline, so there
+        is nothing left to flatten. The legacy branch keeps older installs
+        working — a project pinning an old Playwright should not be told to
+        upgrade just to run acceptance.
+        """
+        modern = getattr(self.page, "aria_snapshot", None)
+        if callable(modern):
+            return truncate_tree(modern() or "(empty tree)")
+        legacy = getattr(self.page, "accessibility", None)
+        if legacy is not None:
+            return truncate_tree("\n".join(flatten(legacy.snapshot())) or "(empty tree)")
+        raise SystemExit(
+            "[drive] this playwright exposes neither page.aria_snapshot() nor "
+            "page.accessibility — point `acceptance.hands` at your own driver."
+        )
 
     def shot(self, path: pathlib.Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
