@@ -10,8 +10,8 @@
 // hardcoded path meant the README could tell you to regenerate one animation
 // with a command that quietly rebuilt the other.
 //
-//   node docs/capture.mjs dark out/frames [docs/pipeline-capture.html]
-//   node docs/capture.mjs dark out/frames docs/steploop-capture.html
+//   node docs/capture.mjs dark out/frames [docs/steploop-capture.html]
+//   node docs/capture.mjs light out/frames docs/some-other-capture.html
 //   ffmpeg -framerate 12 -i out/frames/%04d.png ... pipeline.gif
 import { spawn } from "node:child_process";
 import { mkdir, writeFile, rm } from "node:fs/promises";
@@ -23,7 +23,7 @@ const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const PORT = 9333, SCALE = 2, W = 900, H = 620;
 const theme = process.argv[2] ?? "dark";
 const outDir = path.resolve(process.argv[3] ?? "out/frames");
-const src = process.argv[4] ?? "docs/pipeline-capture.html";
+const src = process.argv[4] ?? "docs/steploop-capture.html";
 if (!existsSync(src)) { console.error(`no such capture page: ${src}`); process.exit(2); }
 const page = "file://" + path.resolve(src) + "?theme=" + theme;
 

@@ -154,6 +154,11 @@ stops growing with the length of the plan.
     the last after a reviewer observed that "the rulebook wins" and "a
     neighbour's bug is out of scope" only produce the right outcome together,
     and nothing recorded that the result was deliberate.
+- **The old pipeline GIF is retired.** The new animation draws the pipeline as
+  a graph itself, so keeping both meant two renderings of the same thing and
+  1.9 MB of duplicate raster in the repository. `docs/pipeline.html` stays —
+  it is the source of the interactive version the README links, which is a
+  different medium and still worth having.
 - **Milestones are numbered `M<n>` in every example and docstring**, where
   they used to be `E<n>` (and `Э<n>` in the Russian diagram). `M` for
   milestone reads as what it is in either language, where `E` was a leftover
