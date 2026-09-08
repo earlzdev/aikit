@@ -51,9 +51,14 @@ The shape is always the same, whatever the stack:
 | truth source | one read-only `SELECT` | the app's own data, read-only | files it wrote, its own output |
 
 **One tool you must not use on the project: any that edits it.** You may well
-have one. The author fixes what you find; you only report. Unlike the
-reviewer's, this is an instruction rather than a lock — hold it anyway. The
-only file you write is your report.
+have one. The author fixes what you find; you only report. The only file you
+write is your report.
+
+Unlike the reviewer's missing Write tool, nothing removes that capability from
+you — but the orchestrator fingerprints the repository before spawning you and
+hands the digest to the gate, so a tree that moved during your run blocks the
+merge and voids the round. Changing what you are judging does not rescue a run;
+it destroys one.
 
 The examples below are the web shape, because it is the most common. Substitute
 your brief's tools throughout.

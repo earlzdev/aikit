@@ -237,3 +237,36 @@ class TestRender(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestWorkingTree(unittest.TestCase):
+    """The acceptance agent can edit code — it holds every tool the project has.
+    "You only report" is an instruction, so the gate checks rather than trusts."""
+
+    def test_unchanged_tree_is_no_defect(self):
+        self.assertEqual(v.defects(report(), tree=("abc123", "abc123")), ())
+
+    def test_changed_tree_blocks(self):
+        decision = v.gate(report(), tree=("abc123", "def456"))
+        self.assertTrue(decision.blocked)
+        self.assertTrue(any("changed during the acceptance run" in d for d in decision.defects))
+
+    def test_unfingerprintable_tree_fails_closed(self):
+        """A check that could not run is not a check that passed."""
+        decision = v.gate(report(), tree=("abc123", ""))
+        self.assertTrue(decision.blocked)
+        self.assertTrue(any("could not be fingerprinted" in d for d in decision.defects))
+
+    def test_owner_override_cannot_lift_a_changed_tree(self):
+        """An owner may disagree with a finding. A void run is not a finding."""
+        decision = v.gate(report(), tree=("abc123", "def456"), overrides=("anything",))
+        self.assertTrue(decision.blocked)
+
+    def test_no_tree_argument_means_no_check(self):
+        """Projects that do not record a digest keep the previous behaviour."""
+        self.assertFalse(v.gate(report()).blocked)
+
+    def test_digest_is_stable_and_short(self):
+        a, b = v.tree_digest(ROOT), v.tree_digest(ROOT)
+        self.assertEqual(a, b)
+        self.assertEqual(len(a), 16)

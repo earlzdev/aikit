@@ -12,6 +12,17 @@ Newest first. What changed, and why.
   what to do when `plan` is invoked with nothing to plan, and that anything
   the owner said when invoking `init` is an answer already given.
 
+## 0.2.1 — 2026-09-08
+
+- **The gate now checks that the acceptance run did not touch the code it was
+  judging.** `verdict tree` fingerprints the repository, the acceptance-loop
+  records it before spawning, and `verdict gate --expect-tree <digest>` blocks
+  if it moved. 0.2.0 gave the agent every tool, editing tools included, and
+  left "you only report" as prose; this puts the guarantee back on the one exit
+  code that already stops a merge. Fails closed — a tree that cannot be
+  fingerprinted is a defect, not a pass — and an owner override cannot lift it,
+  because a void run is not a finding to disagree with.
+
 ## 0.2.0 — 2026-09-08
 
 - **The acceptance agent now holds every tool the project has** — MCP servers,

@@ -37,9 +37,11 @@ HOW:  no third-party imports and no config file on purpose — the skill reads
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import pathlib
 import re
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from typing import Any
@@ -145,6 +147,29 @@ PROBE_ALIASES.update({key: key for key in PROBES})
 
 def label(lang: str, key: str) -> str:
     return LABELS.get(lang, LABELS["en"]).get(key, LABELS["en"].get(key, key))
+
+
+# -- the working tree ---------------------------------------------------------
+
+def tree_digest(cwd: pathlib.Path | None = None) -> str:
+    """A short fingerprint of the repository's working state.
+
+    The acceptance agent holds every tool this project has, editing tools
+    included, and "you never fix anything, you only report" is an instruction
+    it could talk itself out of on a long run. So the orchestrator records this
+    before spawning it and passes it back with `--expect-tree`: if the tree
+    moved while the run was happening, the gate blocks. Detection rather than
+    prevention, but it lands on the one exit code that already stops a merge,
+    which an instruction never does.
+
+    Raises so the caller can fail CLOSED — a check that could not run is not a
+    check that passed, the same rule the whole phase is built on.
+    """
+    out = []
+    for args in (["git", "rev-parse", "HEAD"], ["git", "status", "--porcelain"]):
+        out.append(subprocess.run(args, cwd=cwd, check=True, capture_output=True,
+                                  text=True, timeout=30).stdout)
+    return hashlib.sha256("\n".join(out).encode()).hexdigest()[:16]
 
 
 class BadReport(ValueError):
@@ -288,13 +313,28 @@ def read_overrides(path: pathlib.Path) -> tuple[str, ...]:
 
 # -- the gate itself ----------------------------------------------------------
 
-def defects(report: Report, *, require_db: bool = True) -> tuple[str, ...]:
+def defects(report: Report, *, require_db: bool = True,
+            tree: tuple[str, str] | None = None) -> tuple[str, ...]:
     """Everything that makes the report itself unusable, regardless of findings.
 
     A report with holes cannot support a "good" verdict, so these block just
     like a breakage does — see this module's docstring.
     """
     out: list[str] = []
+
+    if tree is not None:
+        expected, actual = tree
+        if actual == "":
+            out.append(
+                "the working tree could not be fingerprinted, so it is unknown whether "
+                "the acceptance run changed the code it was judging"
+            )
+        elif expected != actual:
+            out.append(
+                f"the working tree changed during the acceptance run "
+                f"({expected} → {actual}). The author fixes what acceptance finds; "
+                f"a run that edited the code it was judging is void, not passed"
+            )
 
     if not report.not_checked:
         out.append(
@@ -324,14 +364,14 @@ def defects(report: Report, *, require_db: bool = True) -> tuple[str, ...]:
 
 
 def gate(report: Report, *, overrides: tuple[str, ...] = (),
-         require_db: bool = True) -> Decision:
+         require_db: bool = True, tree: tuple[str, str] | None = None) -> Decision:
     lifted, blockers = [], []
     for finding in report.findings:
         if finding.klass not in BLOCKING:
             continue
         (lifted if finding.what in overrides else blockers).append(finding)
 
-    found = defects(report, require_db=require_db)
+    found = defects(report, require_db=require_db, tree=tree)
     return Decision(
         blocked=bool(blockers or found),
         blockers=tuple(blockers),
@@ -427,7 +467,8 @@ def override_path(milestone: str, tracker: pathlib.Path) -> pathlib.Path:
 
 
 def run_gate(milestone: str, *, write: bool, tracker: pathlib.Path,
-             root: pathlib.Path, lang: str, require_db: bool) -> int:
+             root: pathlib.Path, lang: str, require_db: bool,
+             expect_tree: str | None = None) -> int:
     path = verdict_path(milestone, root)
     if not path.is_file():
         # No report is "could not", never "good". A run that did not happen
@@ -441,9 +482,16 @@ def run_gate(milestone: str, *, write: bool, tracker: pathlib.Path,
         print(f"[verdict] the report does not parse: {exc}", file=sys.stderr)
         return 1
 
+    tree = None
+    if expect_tree:
+        try:
+            tree = (expect_tree, tree_digest())
+        except (subprocess.SubprocessError, OSError, FileNotFoundError):
+            tree = (expect_tree, "")   # fail closed: unknown is not unchanged
+
     decision = gate(report,
                     overrides=read_overrides(override_path(milestone, tracker)),
-                    require_db=require_db)
+                    require_db=require_db, tree=tree)
     text = render(report, decision, lang)
     print(text)
     if write:
@@ -468,9 +516,14 @@ def build_parser() -> argparse.ArgumentParser:
     gated.add_argument("--lang", default="en", choices=sorted(LABELS))
     gated.add_argument("--no-db", dest="require_db", action="store_false",
                        help="the project has no database the acceptance role can read")
+    gated.add_argument("--expect-tree", metavar="DIGEST",
+                       help="the `verdict tree` digest taken before the acceptance run; "
+                            "the gate blocks if the working tree moved during it")
 
     template = sub.add_parser("template", help="empty report skeleton on stdout")
     template.add_argument("milestone")
+
+    sub.add_parser("tree", help="fingerprint the working tree (record before an acceptance run)")
     return parser
 
 
@@ -480,8 +533,16 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(dict(TEMPLATE, milestone=args.milestone),
                          ensure_ascii=False, indent=2))
         return 0
+    if args.command == "tree":
+        try:
+            print(tree_digest())
+        except (subprocess.SubprocessError, OSError, FileNotFoundError) as exc:
+            print(f"[verdict] cannot fingerprint the working tree: {exc}", file=sys.stderr)
+            return 1
+        return 0
     return run_gate(args.milestone, write=args.write, tracker=args.tracker,
-                    root=args.root, lang=args.lang, require_db=args.require_db)
+                    root=args.root, lang=args.lang, require_db=args.require_db,
+                    expect_tree=args.expect_tree)
 
 
 if __name__ == "__main__":

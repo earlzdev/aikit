@@ -88,6 +88,18 @@ report it and stop. Do not proceed to merge.
 
 ## Phase 1 — round N of the cap
 
+**Fingerprint the working tree before you spawn anything:**
+
+```
+"$CLAUDE_PLUGIN_ROOT/bin/verdict" tree      # record this digest
+```
+
+The acceptance agent holds every tool this project has, editing tools included.
+"You only report, the author fixes" is an instruction it could talk itself out
+of on a long run, so Phase 2 hands this digest back to the gate, which blocks
+if the tree moved while the run was happening. A run that edited the code it
+was judging is void, not passed.
+
 Announce it: "Acceptance, round N of `<cap>`." Spawn the `acceptance` agent
 (Agent tool) with the four-part brief, the round number, and the budget from
 `acceptance.budget` (`--max-actions`, `--minutes`).
@@ -105,15 +117,22 @@ fixed**.
 
 ```
 "$CLAUDE_PLUGIN_ROOT/bin/verdict" gate <milestone> \
-  --tracker <tracker> --evidence-root <evidence> --lang <language>
+  --tracker <tracker> --evidence-root <evidence> --lang <language> \
+  --expect-tree <the digest from Phase 1>
 ```
 
-The gate is mechanical and returns non-zero in two cases:
+The gate is mechanical and returns non-zero in three cases:
 
 - there is a finding of class **broken** or **lies**;
 - **the report is defective**: no "what I could not check" line, one of the
   five probes unanswered, a checklist item marked passed with no evidence, not
-  one screenshot or not one database row.
+  one screenshot or not one database row;
+- **the working tree moved during the run** — or could not be fingerprinted at
+  all, which fails closed for the same reason a stand that did not come up is
+  "could not" and never "good".
+
+None of the three can be lifted by an owner override except a finding: an
+incomplete run and a void run are not opinions to disagree with.
 
 A defective report blocks exactly like a breakage, deliberately: an acceptance
 run that never looked at the data has not earned the right to say "good". When
