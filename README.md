@@ -15,7 +15,7 @@ that **never sees the diff**. Nothing passes on the author's own word.
 Round one fails in both loops above, on purpose — the loop is the product, and a
 clean straight-through run would show you the opposite of what this does.
 [**Watch it interactively →**](https://claude.ai/code/artifact/00501ab2-7b5e-470b-b5bf-8a71054e279c)
-· regenerate the GIF with `node docs/capture.mjs dark out/frames` (see
+· regenerate with `node docs/capture.mjs dark out/frames` (see
 [`docs/capture.mjs`](docs/capture.mjs)).
 
 ## Why it exists
@@ -44,6 +44,25 @@ enforced by a missing tool holds always.
 /plugin marketplace add earlzdev/aikit
 /plugin install aikit
 ```
+
+**Then restart Claude Code.** Skills and agent types are read at startup, so
+until you do, `/aikit:init` is not there and neither are the agents — which
+looks exactly like a failed install and is not one. The same applies to
+upgrades: `/plugin marketplace update aikit && /plugin install aikit` puts the
+new version in the cache, and the session you are sitting in keeps running the
+old one until it restarts.
+
+To upgrade later, and to check which version you are actually on:
+
+```
+/plugin marketplace update aikit
+/plugin install aikit
+ls -d ~/.claude/plugins/cache/aikit/*/*/ | sort -V | tail -1
+```
+
+That last line is the path the skills themselves resolve to. Several versions
+stay cached side by side and the glob takes the highest it finds, so it is
+worth looking rather than assuming.
 
 Then, in a project:
 
@@ -112,12 +131,45 @@ the same work with the cost bounded by a step; autopilot itself sees only
 summaries, reviewer reports and verdict lines — and never a diff or a file's
 contents.
 
+## A run, end to end
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/steploop-dark.gif">
+  <img alt="A two-milestone plan running: the plan on the left ticking off step by step, the whole pipeline as a graph in the middle with the live block lit, and on the right the implementer and reviewer during a step, then the stand and the owner's scenario during acceptance." src="docs/steploop-light.gif" width="900">
+</picture>
+
+The same pipeline, but watching the **work** rather than the shape. The plan is
+on the left and its steps tick off one at a time. The middle is the pipeline
+itself, every block on screen the whole run: the live one lights, finished ones
+go green, and a review round that comes back blocking turns the block red.
+
+The right-hand panel is whatever is happening inside the live block, and it is
+where the two things worth knowing show up. During a step you see the
+**implementer held** while the **reviewer is replaced** — round one of `M1.2`
+blocks, the *same* implementer fixes it because it knows why it wrote that, and
+round two is a reviewer that never saw round one. During acceptance you see the
+stand come up seeded empty and the owner's scenario walked line by line, before
+the checklist and before the probes.
+
+Two details are deliberate. The tracker files down the left light up **as the
+run writes them** — that is how a fresh implementer inherits the last one's
+conventions without an agent being held open. And at the end `ACCEPTANCE` goes
+dashed and grey for `M2`, because that milestone's plan line says
+`acceptance: no`: a phase that deliberately did not happen, which is not the
+same as one that failed.
+
+Regenerate with
+`node docs/capture.mjs dark out/frames docs/steploop-capture.html` — the third
+argument is the page, and it defaults to the pipeline one above. Source:
+[`docs/steploop-capture.html`](docs/steploop-capture.html).
+
 ## What ships
 
 ```
 skills/     init · plan · step-loop · acceptance-loop · autopilot
 agents/     implementer · reviewer-strict · acceptance
 bin/        verdict (the gate) · drive (browser hands)
+docs/       pipeline*.html · steploop*.html — the two animations, regenerable
 ```
 
 `bin/verdict` is dependency-free Python and unit-tested — it is the piece that

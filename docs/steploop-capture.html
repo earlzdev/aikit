@@ -1,0 +1,494 @@
+<!doctype html><html><head><meta charset="utf-8">
+<title>aikit — the plan, step by step</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Capture page: fixed 900x620, one theme per render (?theme=dark|light), no
+   transitions and no CSS animation. Every frame is drawn by __frame(n), so a
+   headless capture is deterministic instead of racing a clock.
+
+   WHAT THIS ONE SHOWS, and why it is not the other diagram: the pipeline GIF
+   draws the SHAPE of the pipeline. This draws the WORK — a real plan on the
+   left whose steps tick off one at a time, and on the right the machinery that
+   ticks them: an implementer that is held across a step's rounds, a reviewer
+   that is replaced on every round, and then a stand the acceptance agent walks
+   scenario-first. */
+:root{
+  --bg:#121A23; --panel:#19232E; --panel2:#1F2C38; --line:#2C3B4A; --line2:#3A4C5E;
+  --ink:#E8EDF2; --ink2:#94A6B6; --ink3:#6B7E90;
+  --brass:#D19A4E; --clean:#5FA88C; --block:#D2694F; --halt:#7E9BC4;
+}
+html[data-theme="light"]{
+  --bg:#F4F5F3; --panel:#FFFFFF; --panel2:#ECEEEA; --line:#D6DAD5; --line2:#BFC6BE;
+  --ink:#18212A; --ink2:#5F6E7B; --ink3:#84919C;
+  --brass:#9A6A1E; --clean:#2F7259; --block:#AF4426; --halt:#3F5F8C;
+}
+*{box-sizing:border-box; margin:0; padding:0}
+html,body{width:900px; height:620px; overflow:hidden}
+body{background:var(--bg); color:var(--ink);
+     font-family:"Archivo","Helvetica Neue",Arial,sans-serif; -webkit-font-smoothing:antialiased}
+.frame{width:900px; height:620px; padding:18px 22px; display:grid;
+       grid-template-rows:auto 1fr; gap:14px}
+
+/* ---- header ---- */
+.bar{display:flex; align-items:baseline; gap:14px; border-bottom:1px solid var(--line);
+     padding-bottom:12px}
+.brand{font-weight:700; font-size:15px; letter-spacing:-.01em}
+.brand span{color:var(--brass)}
+.tag{font-family:"JetBrains Mono",monospace; font-size:10.5px; letter-spacing:.13em;
+     text-transform:uppercase; color:var(--ink3)}
+.bar .right{margin-left:auto; display:flex; align-items:center; gap:12px}
+.phase{font-weight:600; font-size:14px}
+.pill{font-family:"JetBrains Mono",monospace; font-size:10.5px; letter-spacing:.05em;
+      padding:3px 9px; border-radius:20px; border:1px solid currentColor}
+.pill.running{color:var(--brass)} .pill.blocked{color:var(--block)}
+.pill.clean{color:var(--clean)} .pill.halted{color:var(--halt)}
+.meta{font-family:"JetBrains Mono",monospace; font-size:10.5px; color:var(--ink2);
+      font-variant-numeric:tabular-nums}
+.meta b{color:var(--ink); font-weight:500}
+
+.body{display:grid; grid-template-columns:226px 182px 1fr; gap:16px; min-height:0}
+
+/* ---- the plan, on the left ---- */
+.plan{background:var(--panel); border:1px solid var(--line); border-radius:8px;
+      display:flex; flex-direction:column; overflow:hidden}
+.plan .head{padding:9px 13px; border-bottom:1px solid var(--line); background:var(--panel2);
+            font-family:"JetBrains Mono",monospace; font-size:10.5px; color:var(--ink3)}
+.plan .rows{padding:11px 12px; display:flex; flex-direction:column; gap:1px}
+.ms,.st{display:grid; grid-template-columns:17px 1fr; gap:7px; align-items:baseline;
+        padding:5px 6px; border-radius:5px}
+.ms{margin-top:7px}
+.ms:first-child{margin-top:0}
+.ms .g,.st .g{font-family:"JetBrains Mono",monospace; font-size:11px; color:var(--ink3);
+              text-align:center; line-height:1.35}
+.ms .t{font-weight:600; font-size:12.5px; color:var(--ink2); letter-spacing:.01em}
+.st .t{font-family:"JetBrains Mono",monospace; font-size:11px; color:var(--ink3);
+       line-height:1.45}
+.ms.on{background:color-mix(in srgb, var(--brass) 14%, transparent)}
+.ms.on .t{color:var(--ink)} .ms.on .g{color:var(--brass)}
+.ms.done .g{color:var(--clean)} .ms.done .t{color:var(--clean)}
+.st.on{background:color-mix(in srgb, var(--brass) 16%, transparent)}
+.st.on .t{color:var(--ink)} .st.on .g{color:var(--brass)}
+.st.done .g{color:var(--clean)} .st.done .t{color:var(--ink2)}
+.arte{margin-top:auto; padding:10px 13px 11px; border-top:1px solid var(--line)}
+.arte .h{font-family:"JetBrains Mono",monospace; font-size:9px; letter-spacing:.09em;
+         text-transform:uppercase; color:var(--ink3); margin-bottom:6px}
+.ar{font-family:"JetBrains Mono",monospace; font-size:10px; color:var(--ink3);
+    line-height:1.75; opacity:.35}
+.ar.on{opacity:1; color:var(--clean)}
+.plan .foot{padding:8px 13px; border-top:1px solid var(--line);
+            font-family:"JetBrains Mono",monospace; font-size:10px; color:var(--ink3)}
+
+/* ---- the stage, on the right ---- */
+.graph{background:var(--panel); border:1px solid var(--line); border-radius:8px;
+       padding:10px 8px; display:flex; flex-direction:column}
+.graph .head{font-family:"JetBrains Mono",monospace; font-size:9px; letter-spacing:.09em;
+             text-transform:uppercase; color:var(--ink3); padding:0 6px 8px}
+.graph svg{width:100%; height:auto}
+.gseg{fill:none; stroke:var(--line2); stroke-width:1.5}
+.gseg.on{stroke:var(--brass); stroke-width:2.4}
+.gbox{fill:var(--panel2); stroke:var(--line2); stroke-width:1.4}
+.gname{font-family:"Archivo",sans-serif; font-weight:600; font-size:11.5px;
+       letter-spacing:.02em; fill:var(--ink2)}
+.gsub{font-family:"JetBrains Mono",monospace; font-size:8.5px; letter-spacing:.03em; fill:var(--ink3)}
+.gnode.on .gbox{fill:color-mix(in srgb, var(--brass) 17%, var(--panel2)); stroke:var(--brass); stroke-width:2}
+.gnode.on .gname{fill:var(--ink)} .gnode.on .gsub{fill:var(--brass)}
+.gnode.done .gbox{fill:color-mix(in srgb, var(--clean) 13%, var(--panel2)); stroke:var(--clean)}
+.gnode.done .gname{fill:var(--clean)} .gnode.done .gsub{fill:var(--clean)}
+.gnode.bad .gbox{fill:color-mix(in srgb, var(--block) 15%, var(--panel2)); stroke:var(--block); stroke-width:2}
+.gnode.bad .gname{fill:var(--block)} .gnode.bad .gsub{fill:var(--block)}
+.gnode.skip .gbox{stroke-dasharray:4 4} .gnode.skip .gname{fill:var(--ink3)}
+.gloop rect{fill:none; stroke:var(--line2); stroke-width:1.1}
+.gloop.on rect{stroke:var(--brass); fill:color-mix(in srgb, var(--brass) 18%, transparent)}
+.gloop.done rect{stroke:var(--clean); fill:color-mix(in srgb, var(--clean) 15%, transparent)}
+.gloop.off{opacity:0}
+.gltxt{font-family:"JetBrains Mono",monospace; font-size:8px; fill:var(--ink3); letter-spacing:.02em}
+.gloop.on .gltxt{fill:var(--brass)} .gloop.done .gltxt{fill:var(--clean)}
+
+.stage{display:grid; grid-template-rows:246px 1fr; gap:12px; min-height:0}
+.work{background:var(--panel); border:1px solid var(--line); border-radius:8px;
+      position:relative; overflow:hidden}
+.cap{position:absolute; top:11px; left:14px; font-family:"JetBrains Mono",monospace;
+     font-size:10.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--ink3)}
+.layer{position:absolute; inset:34px 14px 12px; display:none}
+.layer.show{display:block}
+
+/* step-loop layer */
+.pair{display:grid; grid-template-columns:1fr 44px 1fr; align-items:center; height:118px}
+.card{border:1.4px solid var(--line2); background:var(--panel2); border-radius:7px;
+      padding:11px 12px; height:112px; display:flex; flex-direction:column; gap:5px}
+.card .n{font-weight:600; font-size:12.5px; letter-spacing:.02em; color:var(--ink2)}
+.card .s{font-family:"JetBrains Mono",monospace; font-size:9.5px; color:var(--ink3);
+         line-height:1.5}
+.card .b{margin-top:auto; font-family:"JetBrains Mono",monospace; font-size:9.5px;
+         letter-spacing:.06em; text-transform:uppercase; color:var(--ink3)}
+.card.on{border-color:var(--brass); background:color-mix(in srgb, var(--brass) 13%, var(--panel2))}
+.card.on .n{color:var(--ink)} .card.on .b{color:var(--brass)}
+.card.ok{border-color:var(--clean); background:color-mix(in srgb, var(--clean) 12%, var(--panel2))}
+.card.ok .n,.card.ok .b{color:var(--clean)}
+.card.bad{border-color:var(--block); background:color-mix(in srgb, var(--block) 13%, var(--panel2))}
+.card.bad .n,.card.bad .b{color:var(--block)}
+.card.gone{opacity:.28}
+.arrow{text-align:center; font-family:"JetBrains Mono",monospace; font-size:15px;
+       color:var(--line2)}
+.arrow.on{color:var(--brass)}
+.rounds{display:flex; align-items:center; gap:8px; margin-top:14px;
+        font-family:"JetBrains Mono",monospace; font-size:10px; color:var(--ink3);
+        letter-spacing:.06em}
+.pip{width:9px; height:9px; border-radius:50%; border:1.4px solid var(--line2)}
+.pip.on{background:var(--brass); border-color:var(--brass)}
+.pip.bad{background:var(--block); border-color:var(--block)}
+.pip.ok{background:var(--clean); border-color:var(--clean)}
+.verd{margin-top:11px; font-family:"JetBrains Mono",monospace; font-size:11.5px;
+      letter-spacing:.03em; color:var(--ink3); min-height:16px}
+.verd.ok{color:var(--clean)} .verd.bad{color:var(--block)}
+
+/* acceptance layer */
+.stand{border:1.4px solid var(--line2); background:var(--panel2); border-radius:7px;
+       padding:9px 12px; display:flex; align-items:center; gap:10px}
+.stand.on{border-color:var(--brass); background:color-mix(in srgb, var(--brass) 13%, var(--panel2))}
+.stand .n{font-weight:600; font-size:12px; color:var(--ink2)}
+.stand.on .n{color:var(--ink)}
+.stand .s{font-family:"JetBrains Mono",monospace; font-size:9.5px; color:var(--ink3);
+          margin-left:auto}
+.scen{margin-top:11px; display:flex; flex-direction:column; gap:3px}
+.scen .h{font-family:"JetBrains Mono",monospace; font-size:9.5px; letter-spacing:.08em;
+         text-transform:uppercase; color:var(--ink3); margin-bottom:3px}
+.sc{display:grid; grid-template-columns:15px 1fr; gap:8px; align-items:baseline;
+    padding:2.5px 5px; border-radius:4px}
+.sc .g{font-family:"JetBrains Mono",monospace; font-size:10px; color:var(--ink3);
+       text-align:center}
+.sc .t{font-family:"JetBrains Mono",monospace; font-size:10.5px; color:var(--ink3);
+       line-height:1.45}
+.sc.on{background:color-mix(in srgb, var(--brass) 15%, transparent)}
+.sc.on .t{color:var(--ink)} .sc.on .g{color:var(--brass)}
+.sc.done .g{color:var(--clean)} .sc.done .t{color:var(--ink2)}
+
+/* ---- the log ---- */
+.term{background:var(--panel); border:1px solid var(--line); border-radius:8px;
+      display:flex; flex-direction:column; overflow:hidden}
+.chrome{display:flex; align-items:center; gap:7px; padding:8px 13px;
+        border-bottom:1px solid var(--line); background:var(--panel2)}
+.dot{width:9px; height:9px; border-radius:50%; background:var(--line2)}
+.chrome .t{font-family:"JetBrains Mono",monospace; font-size:10.5px; color:var(--ink3);
+           margin-left:6px}
+.log{flex:1; overflow:hidden; padding:9px 13px; font-family:"JetBrains Mono",monospace;
+     font-size:11.5px; line-height:1.6; display:flex; flex-direction:column;
+     justify-content:flex-end}
+.log div{display:grid; grid-template-columns:58px 1fr; gap:11px}
+.log .k{color:var(--ink3); text-align:right}
+.log .v{color:var(--ink2); word-break:break-word}
+.log .ok .v{color:var(--clean)} .log .block .v{color:var(--block)}
+.log .cmd .k{color:var(--brass)} .log .cmd .v{color:var(--ink)}
+</style></head><body>
+<div class="frame">
+  <div class="bar">
+    <span class="brand">ai<span>kit</span></span>
+    <span class="tag">the plan, step by step</span>
+    <span class="right">
+      <span class="meta">milestone <b id="msb">—</b> · step <b id="stp">—</b></span>
+      <span class="phase" id="phase">Plan</span>
+      <span class="pill running" id="pill">running</span>
+    </span>
+  </div>
+  <div class="body">
+    <div class="plan">
+      <div class="head">docs/PLAN.md</div>
+      <div class="rows" id="rows"></div>
+      <div class="arte">
+        <div class="h">what the run writes</div>
+        <div class="ar" id="ar-0">docs/tracker/M1/step-notes.md</div>
+        <div class="ar" id="ar-1">docs/tracker/M1/carry-over.md</div>
+        <div class="ar" id="ar-2">docs/tracker/M1/acceptance-verdict.md</div>
+        <div class="ar" id="ar-3">docs/tracker/M2/step-notes.md</div>
+      </div>
+      <div class="foot" id="foot">2 milestones · 3 steps</div>
+    </div>
+    <div class="graph">
+      <div class="head">the pipeline</div>
+      <svg viewBox="0 0 166 452" xmlns="http://www.w3.org/2000/svg">
+        <path class="gseg" id="g-s1" d="M83,54 L83,74"/>
+        <path class="gseg" id="g-s2" d="M83,118 L83,138"/>
+        <path class="gseg" id="g-s3" d="M83,196 L83,216"/>
+        <path class="gseg" id="g-s4" d="M83,274 L83,294"/>
+        <path class="gseg" id="g-s5" d="M83,352 L83,372"/>
+
+        <g class="gnode" id="g-plan"><rect class="gbox" x="8" y="10" width="142" height="44" rx="6"/>
+          <text class="gname" x="20" y="30">PLAN</text>
+          <text class="gsub" x="20" y="44">milestones · steps</text></g>
+        <g class="gnode" id="g-gate"><rect class="gbox" x="8" y="74" width="142" height="44" rx="6"/>
+          <text class="gname" x="20" y="94">OWNER GATE</text>
+          <text class="gsub" x="20" y="108">the one human stop</text></g>
+        <g class="gnode" id="g-step"><rect class="gbox" x="8" y="138" width="142" height="58" rx="6"/>
+          <text class="gname" x="20" y="158">STEP LOOP</text>
+          <text class="gsub" x="20" y="172">implementer · held</text>
+          <text class="gsub" x="20" y="187">reviewer · fresh</text>
+          <g class="gloop" id="g-l1"><rect x="96" y="163" width="46" height="15" rx="7.5"/>
+            <text class="gltxt" id="g-lt1" x="119" y="174" text-anchor="middle">↺ 1/3</text></g></g>
+        <g class="gnode" id="g-acc"><rect class="gbox" x="8" y="216" width="142" height="58" rx="6"/>
+          <text class="gname" x="20" y="236">ACCEPTANCE</text>
+          <text class="gsub" x="20" y="250">stand · no diff</text>
+          <text class="gsub" x="20" y="265">gate decides</text>
+          <g class="gloop" id="g-l2"><rect x="96" y="241" width="46" height="15" rx="7.5"/>
+            <text class="gltxt" id="g-lt2" x="119" y="252" text-anchor="middle">↺ 1/2</text></g></g>
+        <g class="gnode" id="g-close"><rect class="gbox" x="8" y="294" width="142" height="58" rx="6"/>
+          <text class="gname" x="20" y="314">CLOSE</text>
+          <text class="gsub" x="20" y="328">✅ in the plan</text>
+          <text class="gsub" x="20" y="343">same commit</text></g>
+        <g class="gnode" id="g-next"><rect class="gbox" x="8" y="372" width="142" height="44" rx="6"/>
+          <text class="gname" x="20" y="392">NEXT MILESTONE</text>
+          <text class="gsub" x="20" y="406">or the report</text></g>
+      </svg>
+    </div>
+    <div class="stage">
+      <div class="work">
+        <div class="cap" id="cap">step-loop</div>
+        <div class="layer" id="lay-step">
+          <div class="pair">
+            <div class="card" id="c-imp">
+              <div class="n">implementer</div>
+              <div class="s" id="imp-s">spawned for this step</div>
+              <div class="b" id="imp-b">held</div>
+            </div>
+            <div class="arrow" id="arr">→</div>
+            <div class="card" id="c-rev">
+              <div class="n">reviewer</div>
+              <div class="s" id="rev-s">cannot edit · runs verify itself</div>
+              <div class="b" id="rev-b">fresh</div>
+            </div>
+          </div>
+          <div class="rounds"><span>round</span>
+            <i class="pip" id="p1"></i><i class="pip" id="p2"></i><i class="pip" id="p3"></i>
+            <span id="rtxt">1 of 3</span></div>
+          <div class="verd" id="verd"></div>
+        </div>
+        <div class="layer" id="lay-acc">
+          <div class="stand" id="stand">
+            <span class="n">disposable stand</span>
+            <span class="s" id="stand-s">seeded empty · torn down after</span>
+          </div>
+          <div class="scen">
+            <div class="h">the owner's scenario, walked</div>
+            <div id="scen"></div>
+          </div>
+          <div class="verd" id="averd"></div>
+        </div>
+      </div>
+      <div class="term">
+        <div class="chrome"><i class="dot"></i><i class="dot"></i><i class="dot"></i>
+          <span class="t">aikit · autopilot</span></div>
+        <div class="log" id="log"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+// ---- the plan on the left -------------------------------------------------
+const PLAN=[
+  {k:'ms', id:'M1',   t:'M1 — Completing notes'},
+  {k:'st', id:'M1.1', t:'M1.1  complete(root, n)'},
+  {k:'st', id:'M1.2', t:'M1.2  notes done <n>'},
+  {k:'ms', id:'M2',   t:'M2 — Removing notes'},
+  {k:'st', id:'M2.1', t:'M2.1  remove(root, n)'},
+];
+const SCEN=['add two notes','list them','tick the first off','list again — it stuck',
+            'tick off a note that is not there'];
+
+// ---- the run --------------------------------------------------------------
+// Beats. `st` marks plan rows done, `on` marks the active row. Stage state is
+// whatever the beat says; the frame builder holds each beat for `hold` frames.
+const RUN=[
+ {hold:7, phase:'Plan', pill:'running', on:null, done:[], stage:null, stp:'—', msb:'—', arte:0,
+  g:{plan:'on'},
+  log:[['$','/aikit:autopilot','cmd'],['plan','docs/PLAN.md · 2 milestones · 3 steps']]},
+ {hold:5, phase:'Preconditions', pill:'running', on:null, done:[],
+  g:{plan:'done', gate:'on', seg:'s1'},
+  log:[['check','tree clean · on task/M1 · verify_all → ok','ok']]},
+
+ // ---- M1.1 : converges on round one ----
+ {hold:6, phase:'Step M1.1', pill:'running', on:'M1.1', stp:'M1.1', msb:'M1',
+  g:{plan:'done', gate:'done', step:'on', seg:'s2', l1:1, r1:'1/3'},
+  stage:{k:'step', cap:'step-loop · M1.1', imp:'on', impb:'building', rev:'', revb:'not yet',
+         arr:false, pips:['',''  ,''], rtxt:'1 of 3', verd:''},
+  log:[['step','implementer spawned · builds, self-gates, commits']]},
+ {hold:6, phase:'Step M1.1', pill:'running', on:'M1.1',
+  g:{plan:'done', gate:'done', step:'on', l1:1, r1:'1/3'},
+  stage:{k:'step', cap:'step-loop · M1.1', imp:'', impb:'held', rev:'on', revb:'round 1',
+         arr:true, pips:['on','',''], rtxt:'1 of 3', verd:'reading the diff…'},
+  log:[['review','round 1 of 3 · a fresh reviewer-strict']]},
+ {hold:7, phase:'Step M1.1', pill:'clean', on:'M1.1', arte:2,
+  g:{plan:'done', gate:'done', step:'done', l1:0, r1:'clean'},
+  stage:{k:'step', cap:'step-loop · M1.1', imp:'', impb:'released', rev:'ok', revb:'verdict',
+         arr:false, pips:['ok','',''], rtxt:'1 of 3', verd:'VERDICT: CLEAN', vk:'ok'},
+  log:[['review','VERDICT: CLEAN','ok'],['notes','step-notes.md ← what M1.2 inherits']]},
+
+ // ---- M1.2 : round one blocks, round two is a NEW reviewer ----
+ {hold:6, phase:'Step M1.2', pill:'running', on:'M1.2', done:['M1.1'], stp:'M1.2',
+  g:{plan:'done', gate:'done', step:'on', l1:1, r1:'1/3'},
+  stage:{k:'step', cap:'step-loop · M1.2', imp:'on', impb:'building', rev:'', revb:'not yet',
+         arr:false, pips:['','',''], rtxt:'1 of 3', verd:''},
+  log:[['step','implementer reads step-notes.md first']]},
+ {hold:7, phase:'Step M1.2', pill:'blocked', on:'M1.2',
+  g:{plan:'done', gate:'done', step:'bad', l1:1, r1:'1/3'},
+  stage:{k:'step', cap:'step-loop · M1.2', imp:'', impb:'held', rev:'bad', revb:'round 1',
+         arr:true, pips:['bad','',''], rtxt:'1 of 3', verd:'VERDICT: 0 critical, 1 high', vk:'bad'},
+  log:[['review','VERDICT: 0 critical, 1 high','block']]},
+ {hold:6, phase:'Step M1.2', pill:'running', on:'M1.2',
+  g:{plan:'done', gate:'done', step:'on', l1:1, r1:'fixing'},
+  stage:{k:'step', cap:'step-loop · M1.2', imp:'on', impb:'fixing', rev:'gone', revb:'discarded',
+         arr:false, pips:['bad','',''], rtxt:'1 of 3', verd:'the same implementer fixes it'},
+  log:[['fix','findings → the HELD implementer · it knows why it wrote that']]},
+ {hold:7, phase:'Step M1.2', pill:'clean', on:'M1.2',
+  g:{plan:'done', gate:'done', step:'done', l1:0, r1:'clean'},
+  stage:{k:'step', cap:'step-loop · M1.2', imp:'', impb:'released', rev:'ok', revb:'round 2 · NEW',
+         arr:true, pips:['bad','ok',''], rtxt:'2 of 3', verd:'VERDICT: CLEAN', vk:'ok'},
+  log:[['review','round 2 · a FRESH reviewer, never saw round 1','']  ,
+       ['review','VERDICT: CLEAN','ok']]},
+
+ // ---- acceptance for M1 ----
+ {hold:6, phase:'Acceptance M1', pill:'running', on:'M1', done:['M1.1','M1.2'], stp:'—',
+  g:{plan:'done', gate:'done', step:'done', acc:'on', seg:'s3', l2:1, r2:'1/2'},
+  stage:{k:'acc', cap:'acceptance-loop · M1', stand:'on', sub:'up · seeded empty', sc:-1, verd:''},
+  log:[['stand','up · a person with a new account, nothing stored']]},
+ {hold:5, phase:'Acceptance M1', pill:'running', on:'M1',
+  stage:{k:'acc', cap:'acceptance-loop · M1', stand:'on', sub:'up', sc:0, verd:'no diff · no file names'},
+  log:[['accept','brief = 4 items. the diff is not one of them']]},
+ {hold:4, phase:'Acceptance M1', pill:'running', on:'M1',
+  stage:{k:'acc', stand:'on', sub:'up', sc:1, verd:'scenario first, whole'}, log:[]},
+ {hold:4, phase:'Acceptance M1', pill:'running', on:'M1',
+  stage:{k:'acc', stand:'on', sub:'up', sc:2, verd:'scenario first, whole'},
+  log:[['accept','screen says done — asking the store']]},
+ {hold:4, phase:'Acceptance M1', pill:'running', on:'M1',
+  stage:{k:'acc', stand:'on', sub:'up', sc:3, verd:'scenario first, whole'},
+  log:[['truth','SELECT → done=true · screen and store agree','ok']]},
+ {hold:5, phase:'Acceptance M1', pill:'running', on:'M1',
+  stage:{k:'acc', stand:'on', sub:'up', sc:4, verd:'then the checklist, then five probes'},
+  log:[['probe','empty · long · twice · abandoned · back']]},
+ {hold:7, phase:'Acceptance M1', pill:'clean', on:'M1', arte:3,
+  g:{plan:'done', gate:'done', step:'done', acc:'done', close:'on', seg:'s4', l2:0, r2:'good'},
+  stage:{k:'acc', stand:'', sub:'torn down', sc:5, verd:'gate → exit 0 · GOOD', vk:'ok'},
+  log:[['gate','verdict gate M1 → exit 0','ok'],
+       ['close','✅ M1 · the plan, in the same commit as the work','ok']]},
+
+ // ---- M2 : one step, and the plan says no acceptance ----
+ {hold:6, phase:'Step M2.1', pill:'running', on:'M2.1', done:['M1','M1.1','M1.2'], stp:'M2.1', msb:'M2',
+  g:{plan:'done', gate:'done', step:'on', acc:'', close:'', next:'done', seg:'s5', l1:1, r1:'1/3'},
+  stage:{k:'step', cap:'step-loop · M2.1', imp:'on', impb:'building', rev:'', revb:'not yet',
+         arr:false, pips:['','',''], rtxt:'1 of 3', verd:''},
+  log:[['step','a fresh implementer · reads M1 step-notes + carry-over']]},
+ {hold:7, phase:'Step M2.1', pill:'clean', on:'M2.1',
+  g:{plan:'done', gate:'done', step:'done', next:'done', l1:0, r1:'clean'},
+  stage:{k:'step', cap:'step-loop · M2.1', imp:'', impb:'released', rev:'ok', revb:'round 1',
+         arr:true, pips:['ok','',''], rtxt:'1 of 3', verd:'VERDICT: CLEAN', vk:'ok'},
+  log:[['review','VERDICT: CLEAN','ok']]},
+ {hold:9, phase:'Done', pill:'clean', on:null, done:['M1','M1.1','M1.2','M2','M2.1'], stp:'—', msb:'—', arte:4,
+  g:{plan:'done', gate:'done', step:'done', acc:'skip', close:'done', next:'done', seg:'s4', l2:0, r2:'no'},
+  stage:{k:'acc', cap:'acceptance-loop · M2', stand:'', sub:'never came up',
+         sc:-2, verd:'the plan says acceptance: no — a deliberate answer', vk:''},
+  log:[['accept','M2 · acceptance: no · nothing to click, so no phase','']  ,
+       ['close','✅ M2 · both milestones closed','ok']]},
+];
+
+// ---- build the frames -----------------------------------------------------
+const LINES=[], F=[];
+let done=[], on=null, stp='—', stage=null, msb='—', arte=0, g=null;
+RUN.forEach(s=>{
+  if(s.done) done=s.done; if('on' in s) on=s.on; if(s.stp) stp=s.stp;
+  if(s.msb) msb=s.msb; if(s.arte!==undefined) arte=s.arte;
+  if(s.g) g=s.g;
+  // reset `vk` on every beat: merging carried a previous beat's colour onto
+  // a neutral line, which is how the fix line came out red.
+  if(s.stage) stage=Object.assign({}, stage && stage.k===s.stage.k ? stage : {},
+                                  {vk:''}, s.stage);
+  const base=LINES.length; (s.log||[]).forEach(l=>LINES.push(l));
+  for(let k=0;k<s.hold;k++)
+    F.push({done:done.slice(), on, stp, stage, phase:s.phase, pill:s.pill, msb, arte, g,
+            lines:Math.min(base+1+Math.floor(k/2), base+(s.log||[]).length)});
+});
+window.__frames=F.length;
+
+// ---- draw one frame -------------------------------------------------------
+const $=id=>document.getElementById(id);
+const rows=$('rows');
+PLAN.forEach(p=>{
+  const d=document.createElement('div'); d.className=p.k; d.id='row-'+p.id;
+  const g=document.createElement('span'); g.className='g'; g.textContent=p.k==='ms'?'→':'·';
+  const t=document.createElement('span'); t.className='t'; t.textContent=p.t;
+  d.append(g,t); rows.append(d);
+});
+const scen=$('scen');
+SCEN.forEach((s,i)=>{
+  const d=document.createElement('div'); d.className='sc'; d.id='sc-'+i;
+  const g=document.createElement('span'); g.className='g'; g.textContent='·';
+  const t=document.createElement('span'); t.className='t'; t.textContent=s;
+  d.append(g,t); scen.append(d);
+});
+window.__frame=n=>{
+  const f=F[n];
+  // the plan
+  PLAN.forEach(p=>{
+    const el=$('row-'+p.id); el.className=p.k;
+    const g=el.querySelector('.g');
+    if(f.done.includes(p.id)){ el.classList.add('done'); g.textContent='✅'; }
+    else if(f.on===p.id){ el.classList.add('on'); g.textContent=p.k==='ms'?'→':'▸'; }
+    else g.textContent=p.k==='ms'?'→':'·';
+  });
+  // the pipeline graph: every block always visible, the live one lit
+  const G=f.g||{};
+  ['plan','gate','step','acc','close','next'].forEach(k=>{
+    const el=$('g-'+k); el.setAttribute('class','gnode'+(G[k]?' '+G[k]:''));
+  });
+  ['s1','s2','s3','s4','s5'].forEach(k=>{
+    const el=$('g-'+k); el.setAttribute('class','gseg'+(G.seg===k?' on':''));
+  });
+  const badge=(el,txt,st)=>{
+    $(el).setAttribute('class','gloop'+(st===1?' on':st===0?' done':' off'));
+    $('g-lt'+el.slice(-1)).textContent=txt||'';
+  };
+  badge('g-l1', G.r1, G.l1===undefined?-1:G.l1);
+  badge('g-l2', G.r2, G.l2===undefined?-1:G.l2);
+  $('phase').textContent=f.phase;
+  $('msb').textContent=f.msb;
+  for(let i=0;i<4;i++) $('ar-'+i).className='ar'+(i<f.arte?' on':'');
+  $('pill').textContent=f.pill; $('pill').className='pill '+f.pill;
+  $('stp').textContent=f.stp;
+  // the stage
+  const s=f.stage||{};
+  $('lay-step').className='layer'+(s.k==='step'?' show':'');
+  $('lay-acc').className='layer'+(s.k==='acc'?' show':'');
+  if(s.cap) $('cap').textContent=s.cap;
+  if(s.k==='step'){
+    $('c-imp').className='card'+(s.imp?' '+s.imp:'');
+    $('c-rev').className='card'+(s.rev?' '+s.rev:'');
+    $('imp-b').textContent=s.impb||''; $('rev-b').textContent=s.revb||'';
+    $('arr').className='arrow'+(s.arr?' on':'');
+    (s.pips||[]).forEach((v,i)=>{ $('p'+(i+1)).className='pip'+(v?' '+v:''); });
+    $('rtxt').textContent=s.rtxt||'';
+    $('verd').textContent=s.verd||''; $('verd').className='verd'+(s.vk?' '+s.vk:'');
+  }
+  if(s.k==='acc'){
+    $('stand').className='stand'+(s.stand?' '+s.stand:'');
+    $('stand-s').textContent=s.sub||'';
+    SCEN.forEach((_,i)=>{
+      const el=$('sc-'+i); el.className='sc';
+      const g=el.querySelector('.g');
+      if(s.sc===-2){ g.textContent='·'; el.style.opacity='.3'; return; }
+      el.style.opacity='';
+      if(i<s.sc){ el.classList.add('done'); g.textContent='✓'; }
+      else if(i===s.sc){ el.classList.add('on'); g.textContent='▸'; }
+      else g.textContent='·';
+    });
+    $('averd').textContent=s.verd||''; $('averd').className='verd'+(s.vk?' '+s.vk:'');
+  }
+  // the log
+  const log=$('log'); log.replaceChildren();
+  LINES.slice(Math.max(0,f.lines-6), f.lines).forEach(([k,v,kind])=>{
+    const d=document.createElement('div'); if(kind) d.className=kind;
+    const a=document.createElement('span'); a.className='k'; a.textContent=k;
+    const b=document.createElement('span'); b.className='v'; b.textContent=v;
+    d.append(a,b); log.append(d);
+  });
+};
+const theme=new URLSearchParams(location.search).get('theme');
+if(theme==='light') document.documentElement.setAttribute('data-theme','light');
+window.__frame(0);
+</script></body></html>

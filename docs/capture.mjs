@@ -1,23 +1,31 @@
-// Renders docs/pipeline-capture.html to a PNG frame sequence with headless
-// Chrome over the DevTools Protocol. No npm install: Node's built-in WebSocket
-// speaks CDP directly, and the only other requirement is a Chrome on the box.
+// Renders a capture page to a PNG frame sequence with headless Chrome over the
+// DevTools Protocol. No npm install: Node's built-in WebSocket speaks CDP
+// directly, and the only other requirement is a Chrome on the box.
 //
 // Deterministic on purpose — the page exposes __frames and __frame(n), so this
 // draws frame n and screenshots it rather than screen-recording a clock and
 // hoping the timing lands.
 //
-//   node docs/capture.mjs dark  out/frames
+// The page is an argument because there is more than one of them, and a
+// hardcoded path meant the README could tell you to regenerate one animation
+// with a command that quietly rebuilt the other.
+//
+//   node docs/capture.mjs dark out/frames [docs/pipeline-capture.html]
+//   node docs/capture.mjs dark out/frames docs/steploop-capture.html
 //   ffmpeg -framerate 12 -i out/frames/%04d.png ... pipeline.gif
 import { spawn } from "node:child_process";
 import { mkdir, writeFile, rm } from "node:fs/promises";
 import { setTimeout as sleep } from "node:timers/promises";
 import path from "node:path";
+import { existsSync } from "node:fs";
 
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const PORT = 9333, SCALE = 2, W = 900, H = 620;
 const theme = process.argv[2] ?? "dark";
 const outDir = path.resolve(process.argv[3] ?? "out/frames");
-const page = "file://" + path.resolve("docs/pipeline-capture.html") + "?theme=" + theme;
+const src = process.argv[4] ?? "docs/pipeline-capture.html";
+if (!existsSync(src)) { console.error(`no such capture page: ${src}`); process.exit(2); }
+const page = "file://" + path.resolve(src) + "?theme=" + theme;
 
 const profile = path.join(process.env.TMPDIR ?? "/tmp", `aikit-capture-${theme}`);
 await rm(profile, { recursive: true, force: true });
