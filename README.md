@@ -124,8 +124,10 @@ Contract and worked example: [`docs/harness.md`](docs/harness.md).
 
 Hands are optional — `bin/drive` attaches to a Chromium over CDP and gives the
 agent an accessibility tree plus a screenshot after each action, enforcing the
-action and time budgets itself. Point `acceptance.drive` at your own driver
-when the browser is only reachable from inside a container.
+action and time budgets itself. Point `acceptance.hands` at your own driver when
+the browser is only reachable from inside a container — or at MCP tools, for a
+stack that is not a browser at all. The agent holds every tool the project has;
+`hands` and `truth` only tell it which ones reach this product.
 
 ## Status
 

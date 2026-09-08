@@ -72,10 +72,18 @@ acceptance:
   stand:
     up: "scripts/acceptance/stand.sh up"
     down: "scripts/acceptance/stand.sh down"
-  query: "scripts/acceptance/query.py"
-  # Hands. Omit `drive` to use aikit's own `bin/drive`; set it to a project
-  # command when the browser is only reachable from inside a container.
-  drive: "scripts/acceptance/drive.py"
+  # Hands and truth source. `kind` says how the agent reaches them:
+  #   command — a shell command it runs
+  #   mcp     — tools from an MCP server it already has
+  #   skill   — a skill it invokes
+  # The agent has EVERY tool the project has; these keys tell it which ones are
+  # the hands for this product, so it does not have to guess.
+  hands:
+    kind: command
+    use: "scripts/acceptance/drive.py"   # omit to use aikit's own bin/drive
+  truth:
+    kind: command
+    use: "scripts/acceptance/query.py"   # one read-only SELECT
   browser:
     mode: cdp                       # cdp | local | project
     cdp: "http://127.0.0.1:9222"
@@ -114,7 +122,7 @@ point at production. The acceptance agent clicks everything, types a
 thousand characters into fields, and abandons flows halfway on purpose. That
 belongs somewhere that gets torn down afterwards.
 
-**`acceptance.query`** — read-only, one `SELECT`, no write privileges *in the
+**`acceptance.truth`** — read-only, one `SELECT`, no write privileges *in the
 database role*, not merely by instruction. This is what separates "works"
 from "works, but lies", and an acceptance agent that could write a row would
 one day help itself to one instead of reporting that the button didn't
@@ -126,6 +134,7 @@ and the acceptance phase is worth less.
 
 ## What aikit does NOT read
 
-No key points at source files, module names, or a diff. The acceptance
-agent's blindness to implementation is a property of the config's shape, not
-a rule it is asked to follow.
+No key points at source files, module names, or a diff. The acceptance agent
+holds every tool the project has — it could read the source — but nothing here
+tells it where to look, and the gate accepts only evidence the PRODUCT
+produced. Reading the implementation earns it nothing and costs the check.

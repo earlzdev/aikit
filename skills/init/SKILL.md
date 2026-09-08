@@ -70,7 +70,7 @@ already has rather than beside it: a second stack with the same services
 diverges from the first within a milestone, and acceptance would then be
 checking yesterday's configuration. It must never point at production.
 
-**`acceptance.query`** — one read-only `SELECT` against the stand's database.
+**`acceptance.truth`** — one read-only `SELECT` against the stand's database.
 Read-only as a property of the database role, not as an instruction: an
 acceptance agent able to write a row will one day help itself to one instead of
 reporting that the button failed to create it.
@@ -79,10 +79,15 @@ reporting that the button failed to create it.
 example. Scaffold both as stubs that exit non-zero with a clear message, so an
 unconfigured harness fails loudly instead of silently passing.
 
-Hands are optional: leave `acceptance.drive` unset to use aikit's own
-`bin/drive` (it attaches to a Chromium over CDP at `acceptance.browser.cdp`),
-or point it at the project's own driver when the browser is only reachable from
-inside a container.
+Hands are optional for a web product: leave `acceptance.hands` unset to use
+aikit's own `bin/drive` (it attaches to a Chromium over CDP at
+`acceptance.browser.cdp`), or name the project's own driver when the browser is
+only reachable from inside a container.
+
+For any other stack, `hands` and `truth` take `kind: mcp` or `kind: skill` and
+name tools the agent already carries — it holds every tool this project has.
+Interview for those the same way: what reaches this product the way a person
+does, and what can read its data without being able to change it.
 
 ## 5. Prove it, don't declare it
 

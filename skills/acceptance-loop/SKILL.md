@@ -17,7 +17,7 @@ HOW:  bring up a disposable stand, assemble a BRIEF (no diff!), run the
       whether the milestone may merge. Rounds work like review-loop's.
 -->
 
-Read `aikit.yml` first: `acceptance` (rounds, budget, stand, query, drive,
+Read `aikit.yml` first: `acceptance` (rounds, budget, stand, hands, truth,
 browser, entrypoints, seed), `plan.markers`, `tracker`, `evidence`, `language`.
 
 ## When this phase exists, and when it does not
@@ -63,16 +63,22 @@ stateless; the whole context is handed over on every run):
    is absent *on purpose* gets filed as a bug;
 2. the "done when" checklist;
 3. the owner's scenario, in words;
-4. the hands and the database access — the driver command, the query command,
-   `acceptance.entrypoints` and `acceptance.seed`, and the output language —
+4. the hands and the truth source — from `acceptance.hands` and
+   `acceptance.truth`, whether those are commands, MCP tools or a skill —
+   plus `acceptance.entrypoints`, `acceptance.seed` and the output language,
    with **no project file names**.
+
+The agent holds every tool the project has; item 4 tells it which of them reach
+THIS product, so it does not spend a budget discovering that. Its blindness to
+the implementation is not its tool list — a shell alone would defeat that — it
+is this brief plus a gate that accepts only evidence the product produced.
 
 While assembling the brief, reread it as a stranger would. If it lets anyone
 work out WHAT WAS CHANGED IN THE CODE, cut that out.
 
 ## Phase 0 — the stand
 
-Run `acceptance.stand.up`. It must bring up a **disposable** stand and seed
+Run `acceptance.stand.up` — a command, or the tool sequence it names. It must bring up a **disposable** stand and seed
 whatever `acceptance.seed` describes — empty, deliberately: acceptance walks
 the path from zero, like an owner with a new account, not through yesterday's
 data where everything is already set up.

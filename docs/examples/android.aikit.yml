@@ -1,0 +1,80 @@
+# An Android app, with the emulator as the acceptance stand.
+#
+# The point of this example: the acceptance agent holds every tool the project
+# has, so its hands do not have to be a shell command. Here they are the MCP
+# tools of an emulator driver, and the "disposable stand" is a snapshot — which
+# is a stronger guarantee than a compose stack, since a snapshot restores a
+# byte-identical device every run.
+version: 1
+
+language: en
+
+plan:
+  path: docs/PLAN.md
+  markers:
+    milestone: "^##+\\s"
+    done_when: "Done when"
+    acceptance: "acceptance"
+    yes: "yes"
+    no: "no"
+
+tracker: docs/tracker
+evidence: .acceptance
+
+zones:
+  - key: app
+    label: "Android app"
+    paths: ["app/**", "core/**"]
+    rulebook: .claude/projects/01-app-rulebook.md
+    verify: "./gradlew testDebugUnitTest detekt"
+  - key: api
+    label: "Backend"
+    paths: ["server/**"]
+    rulebook: .claude/projects/02-api-rulebook.md
+    verify: "./gradlew :server:test"
+
+verify_all: "./gradlew check"
+
+review:
+  reviewer: reviewer-strict
+  rounds: { develop: 3, fix: 2 }
+
+acceptance:
+  rounds: 3
+  budget: { actions: 120, minutes: 45 }
+
+  stand:
+    kind: mcp
+    # A snapshot restores the same device every run, so acceptance walks the
+    # first-use path instead of yesterday's half-configured state.
+    up: "start_emulator(pixel_7_api_34) → wait_for_boot → snapshot_load(acceptance-clean)
+         → install_app(debug) → clear_app_data → launch_app"
+    down: "stop_emulator"
+
+  hands:
+    kind: mcp
+    server: android-driver
+    use: "screen for the tree · tap, long_press, type_text, swipe, press_key, scroll_to
+          for input · screenshot for evidence · expect_no_crash after each flow"
+    # The web's label tree names things a person sees; Android's names things a
+    # developer wrote (@id/btn_save). Do not treat a resource id as a hint about
+    # where the change was made — it is how the platform addresses a widget.
+    note: "resource ids are addressing, not implementation. do not go looking."
+
+  truth:
+    kind: mcp
+    use: "shell — READ ONLY: sqlite3 on the app database, dumpsys, logcat_read"
+    # Honest limitation: adb shell can write. Unlike a database role with no
+    # INSERT privilege, this holds by instruction. Wrap it if that matters, or
+    # record here that the weaker guarantee was accepted deliberately.
+    guarantee: instruction
+
+  entrypoints:
+    - name: "The app itself"
+      note: "launched on the emulator by stand.up; sign in with the seeded account"
+  seed: "a signed-in account with no saved items"
+
+git:
+  main: main
+  branch_prefix: "task/"
+  pr: true

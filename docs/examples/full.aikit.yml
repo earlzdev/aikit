@@ -54,11 +54,15 @@ acceptance:
   stand:
     up: "scripts/acceptance/stand.sh up"
     down: "scripts/acceptance/stand.sh down"
-  query: "scripts/acceptance/query.py"
   # This project's browser lives inside the stand's network namespace — the
   # only place `localhost` and a valid Origin mean the right thing — so it
   # keeps its own driver instead of aikit's.
-  drive: "scripts/acceptance/drive.py"
+  hands:
+    kind: command
+    use: "scripts/acceptance/drive.py"
+  truth:
+    kind: command
+    use: "scripts/acceptance/query.py"
   entrypoints:
     - name: "Landing"
       url: "http://localhost/"

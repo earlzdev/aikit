@@ -12,6 +12,23 @@ Newest first. What changed, and why.
   what to do when `plan` is invoked with nothing to plan, and that anything
   the owner said when invoking `init` is an answer already given.
 
+## 0.2.0 — 2026-09-08
+
+- **The acceptance agent now holds every tool the project has** — MCP servers,
+  skills, browser control — instead of `Bash, Write`. The narrow list never
+  bought the blindness it looked like it bought: a shell alone reads any file.
+  What actually holds is the brief, which carries no file name, and the gate,
+  which accepts only evidence the PRODUCT produced — a checklist item cannot be
+  paid for with a line of source. So the restriction cost capability and
+  protected nothing. `reviewer-strict` keeps its narrow list, where "cannot
+  edit" IS the lock.
+- **`acceptance.drive`/`query` became `hands`/`truth`, each with a `kind`** —
+  `command`, `mcp` or `skill`. A stack whose hands are MCP tools rather than a
+  shell command is now expressible, which is what Android needs.
+- **`docs/examples/android.aikit.yml`** — the emulator as the acceptance stand,
+  with the two guarantees that get weaker there written down rather than
+  discovered: resource ids leak developer names, and `adb shell` can write.
+
 ## Unreleased
 
 - **`docs/pipeline.html`** — an animated trace of one task through the pipeline.

@@ -1,7 +1,7 @@
 # The acceptance harness — the two commands aikit cannot write for you
 
 <!--
-WHAT: the contract for `acceptance.stand` and `acceptance.query`.
+WHAT: the contract for `acceptance.stand` and `acceptance.truth`.
 WHY:  everything else in the acceptance phase is a method, and a method ships.
       Bringing up a stand and reading a database are irreducibly this
       project's: its compose file, its schema, its credentials. Rather than
@@ -44,11 +44,13 @@ Build it on top of the project's existing e2e stand rather than beside it. A
 second stack with the same services diverges from the first within one
 milestone, and acceptance then checks a configuration nobody ships.
 
-## 2. `acceptance.query`
+## 2. `acceptance.truth`
 
 ```yaml
 acceptance:
-  query: "scripts/acceptance/query.py"
+  truth:
+    kind: command
+    use: "scripts/acceptance/query.py"
 ```
 
 Called as `<query> "SELECT …"`, and `<query> --tables` to list what is visible.
@@ -81,13 +83,13 @@ implementation costs nothing to maintain.
 
 ## 4. Hands
 
-Optional and pre-built. Leave `acceptance.drive` unset and aikit's own
+Optional and pre-built for the web. Leave `acceptance.hands` unset and aikit's own
 `bin/drive` attaches to a Chromium over CDP at `acceptance.browser.cdp`, which
 the stand is expected to expose. It gives back an accessibility tree after each
 action, writes a numbered screenshot beside it, and enforces the action and
 time budgets itself.
 
-Set `acceptance.drive` to the project's own driver when the browser is only
+Set `acceptance.hands` to the project's own driver when the browser is only
 reachable from inside a container — that is the common case for a stand whose
 network namespace is the only place `localhost` and a valid `Origin` mean the
 right thing. The driver must accept the verbs listed in `agents/acceptance.md`
@@ -103,3 +105,24 @@ whitelist, and a `drive.py` that runs its host half and its in-container half
 out of one file. That last shape is worth copying when your browser lives
 inside the stand: the host half re-invokes itself through the container and
 collects the artefacts back, so no separate acceptance server is needed.
+
+## 5. Stacks that are not the web
+
+The three contracts above are shapes, not shell commands. The acceptance agent
+holds every tool the project has, so `kind: mcp` or `kind: skill` names tools it
+already carries instead of a command it runs.
+
+**Android.** An emulator snapshot is a better disposable stand than a compose
+stack — `snapshot_load` gives a byte-identical start state every run, which is
+exactly the property `stand.up` is asking for. The screen index plays the part
+of the accessibility tree; tap, type and swipe are the hands.
+
+Two things get weaker there and are worth knowing rather than discovering:
+a UI tree made of resource ids (`@id/btn_save`) leaks developer names the web's
+label tree does not, and an unrestricted `adb shell` can write, so a truth
+source built on it holds by instruction rather than by privilege. Wrap it, or
+record that you accepted the weaker guarantee.
+
+**A CLI or a service with no interface.** The hands are the command itself and
+the truth source is what it wrote. Set `--no-db` on the gate when there is no
+store to read; everything else is unchanged.
