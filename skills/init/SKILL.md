@@ -23,9 +23,19 @@ sitting in `Makefile` wastes the owner's attention on the wrong questions.
   `CLAUDE.md`, existing rulebooks in `.claude/projects/`, top-level source
   directories, separate test suites, distinct language stacks. Two to four
   zones is usual. One is fine for a small project.
+  Files that belong to no zone are normal and expected — a `Makefile`,
+  `CLAUDE.md`, CI config. Leave them out of every zone: a change touching only
+  them matches no zone command, and the rule is then `verify_all`. Do not
+  invent a zone to hold them, and do not list one file in several zones to
+  force that — say it once in the config's comments if it needs saying.
 - **Verify commands.** `Makefile` targets, `package.json` scripts, CI workflow
   steps, `pyproject.toml`, `pytest.ini`. The CI workflow is the best source:
   it is what the project already believes "green" means.
+- **Rulebooks.** `.claude/projects/*.md`, or whatever the project calls them.
+  If there are none, **omit `zones[].rulebook` entirely** — a key pointing at a
+  file that does not exist is worse than an absent key, because a reviewer told
+  to read it will report the missing file instead of reviewing the diff. The
+  project's `CLAUDE.md`, if it has one, carries the conventions instead.
 - **A plan.** `docs/PLAN.md`, `PLAN.md`, `ROADMAP.md`. If one exists, read its
   wording and take `plan.markers` from what it actually says. Never impose the
   defaults on a plan that already has its own words.
@@ -50,7 +60,8 @@ do not ask it again. Batch what remains. Typically:
 
 ## 3. Write `aikit.yml`
 
-At the repo root. The reference is `${CLAUDE_PLUGIN_ROOT}/docs/config.md` —
+At the repo root. The reference is `$AIKIT/docs/config.md` (see §5 step 1 for
+`$AIKIT`) —
 read it before writing, and write only the keys this project actually needs.
 Omitting the whole `acceptance` block is a valid, common configuration.
 
@@ -61,8 +72,11 @@ committed.
 
 ## 4. The two things aikit cannot write for you
 
-Everything else is shipped or configured. These two are irreducibly the
-project's, because they touch its own stack:
+**Skip this whole section if you left the `acceptance` block out in §3** — with
+no block, nothing references these and a stub nobody calls is just litter.
+
+Otherwise: everything else is shipped or configured, and these two are
+irreducibly the project's, because they touch its own stack:
 
 **`acceptance.stand.up` / `.down`** — bring up a disposable stand and tear it
 down with its volumes. Build it on top of whatever e2e stand the project
@@ -75,7 +89,7 @@ Read-only as a property of the database role, not as an instruction: an
 acceptance agent able to write a row will one day help itself to one instead of
 reporting that the button failed to create it.
 
-`${CLAUDE_PLUGIN_ROOT}/docs/harness.md` has the full contract and a worked
+`$AIKIT/docs/harness.md` has the full contract and a worked
 example. Scaffold both as stubs that exit non-zero with a clear message, so an
 unconfigured harness fails loudly instead of silently passing.
 
@@ -97,16 +111,38 @@ milestones later.
 
 1. `verify_all` — must pass on untouched code.
 2. Each zone's `verify` — must pass.
-3. `echo "$CLAUDE_PLUGIN_ROOT"` — must resolve. If it does not, find the
-   plugin's installed path and record it in `aikit.yml` as `bin:` so the skills
-   can find `verdict` and `drive`.
-4. The gate, end to end, in a scratch directory:
+3. **Resolve aikit's binaries and prove it.** They live in the installed
+   plugin, not in this project, and `$CLAUDE_PLUGIN_ROOT` is *not* set in a
+   Bash tool call — so it can never be the only source:
+
+   ```bash
+   # In this order. `$CLAUDE_PLUGIN_ROOT` is NOT set inside a Bash tool call,
+   # so it can never be the only source.
+   AIKIT="$(plugin_root_from_aikit_yml)"          # `plugin_root:` in aikit.yml, if set
+   AIKIT="${AIKIT:-$CLAUDE_PLUGIN_ROOT}"
+   AIKIT="${AIKIT:-$(ls -d ~/.claude/plugins/cache/aikit/*/*/ 2>/dev/null | sort -V | tail -1)}"
+   AIKIT="${AIKIT%/}"; echo "$AIKIT"; "$AIKIT/bin/verdict" --help >/dev/null && echo ok
    ```
-   "$CLAUDE_PLUGIN_ROOT/bin/verdict" template probe > /tmp/aikit-probe/verdict.json
-   "$CLAUDE_PLUGIN_ROOT/bin/verdict" gate probe --evidence-root /tmp/aikit-probe
+
+   (`plugin_root_from_aikit_yml` is shorthand — read that optional key yourself.)
+
+   If that finds nothing, or finds a version other than the one you mean,
+   locate the plugin yourself and **write its absolute path into `aikit.yml` as
+   a top-level `plugin_root:`** — every skill checks that key first. It is the
+   plugin's ROOT, the directory holding `bin/`, not `bin/` itself. Do not leave this to be discovered later: a project whose skills
+   cannot find `verdict` fails at the acceptance gate, which is the worst
+   moment to learn about it.
+4. The gate, end to end, in a scratch directory. The gate reads
+   `<evidence-root>/<milestone>/verdict.json`, so the milestone's own directory
+   has to exist:
    ```
-   It must exit 0 on the skeleton. Then delete a required field and confirm it
-   exits 1 — a gate that cannot fail is not a gate.
+   mkdir -p /tmp/aikit-probe/probe
+   "$AIKIT/bin/verdict" template probe > /tmp/aikit-probe/probe/verdict.json
+   "$AIKIT/bin/verdict" gate probe --evidence-root /tmp/aikit-probe   # exit 0
+   ```
+   Then delete the `not_checked` field from that file and run the gate again:
+   it must exit 1 and name the missing line. A gate that cannot fail is not a
+   gate, and this is the only step here that proves it can.
 5. If acceptance is configured: `acceptance.stand.up`, then the query command,
    then `acceptance.stand.down`. Confirm the stand actually came up and the
    query actually returned rows.

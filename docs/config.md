@@ -29,9 +29,14 @@ plan:
   # The plan is prose a human reads, so its section markers are words, and
   # words differ per project. aikit never hardcodes them.
   markers:
-    milestone: "^##+\\s"        # regex: what starts a milestone heading
-    done_when: "Готово, когда"  # the checklist block's opening words
-    acceptance: "приёмка"       # the line that decides whether acceptance runs
+    # A milestone heading carries its STATUS. That glyph is what separates a
+    # milestone from a step and from a plain `##` section like "General rules"
+    # — `^##+\s` matched all three, which cost the distinction the whole plan
+    # format rests on.
+    milestone: "^## [→✅]"
+    step: "^### "
+    done_when: "Готово, когда"
+    acceptance: "приёмка"
     yes: "да"
     no: "нет"
 
@@ -111,7 +116,11 @@ git:
 ## Keys that carry weight
 
 **`plan.markers`** — the plan is written for a human, so aikit matches its
-words rather than imposing a schema. The defaults above are the Russian
+words rather than imposing a schema. `milestone` must NOT match a step or a
+plain section heading: milestones are the unit that merges and goes through
+acceptance, steps are the unit that goes through review, and a marker that
+matches both silently turns every step into a milestone. Keying on the status
+glyph is what keeps them apart. The defaults above are the Russian
 wording of the project this pipeline grew in; a project writing its plan in
 English sets `done_when: "Done when"`,
 `acceptance: "acceptance"`, `yes: "yes"`, `no: "no"`.

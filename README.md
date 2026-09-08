@@ -131,18 +131,49 @@ stack that is not a browser at all. The agent holds every tool the project has;
 
 ## Status
 
-`0.2.2`. Verified against a real project, not only in unit tests:
+`0.3.0`. What has actually been run, and what has not — the distinction matters,
+because the two bugs found so far were both in code that had never executed.
 
-- **`bin/verdict`** — 61 unit tests, plus an end-to-end pass in a scratch git
-  repo covering all fifteen gate paths: blocking findings, every report defect,
-  the owner override, `--no-db`, and the working-tree tripwire — including that
-  a gitignored evidence directory does *not* trip it, that a test suite writing
-  bytecode does not either, and that a real source edit does.
-- **`bin/drive`** — driven against a live headless Chromium: opens a page,
-  reads back an accessibility tree, types and clicks by role, and refuses once
-  the action budget is spent.
-- **The skills and agents** are written procedure, not code. `reviewer-strict`
-  has been run on a real diff; the rest is exercised by using it.
+**Exercised end to end**
+
+- **`bin/verdict`** — 68 unit tests, plus a full pass in a scratch git repo:
+  every gate path (blocking findings, each report defect, the owner override,
+  `--no-db`, `--write`, a missing report) and both tripwire directions —
+  a test suite writing bytecode does *not* trip it, a source edit does.
+- **`bin/drive`** — every verb against a live headless Chromium: open, click,
+  fill, type, press, wait, upload, reload, back, snap, and the action budget
+  refusing once spent.
+- **`reviewer-strict`** — run on a real diff. It ran the project's verify
+  command itself, found the planted defect and both rulebook violations, rated
+  an edge case Low rather than inflating it, returned a parseable `VERDICT:`
+  line, and left the working tree byte-identical.
+- **The acceptance loop, whole, twice** — against a toy app carrying one planted
+  defect: the screen prints "Saved: <name>" and the row is never written. The
+  agent brought up the stand, walked the owner's scenario, **queried the
+  database rather than believing the screen**, and classed it `lies` — the
+  class that exists for exactly this. It ran all five probes, attached 22
+  screenshots and 10 database rows, wrote a 990-character "what I could not
+  check" line, and found five defects nobody planted. The gate returned exit 1.
+  The tripwire confirmed it edited nothing, though it holds every tool. A
+  second round against the *repaired* app blocked again, correctly: it found a
+  POST-then-reload that duplicated the contact on every refresh, and a name
+  rendered into the page unescaped — screen and stored value disagreeing, which
+  is also an injection hole. It verified the previous round's findings were
+  fixed and corrected one of its own earlier conclusions with better reasoning.
+
+- **`autopilot`** — a full milestone plus the handover into acceptance:
+  preconditions (it caught that the run
+  was starting on `main` and branched), step → review-loop → converged on round
+  one, acceptance correctly skipped on a milestone marked `acceptance: no`,
+  then `✅` written into the plan in the same commit as the work. Its stop
+  conditions were checked too: a pre-red suite halts it before any work, and a
+  blocking acceptance verdict keeps a milestone open.
+- **`init` and `plan`** — run cold by agents that had only the skill text, in
+  fresh projects. Both produced usable output and between them found six and
+  four defects in their own instructions, all fixed in 0.2.3.
+
+**Not yet run by anyone**
+- The **Android path** in `docs/examples/android.aikit.yml`.
 
 Two guarantees are hard — the reviewer has no editing tool in its process, and
 the gate's exit code is a number. Everything else is procedure a model follows.

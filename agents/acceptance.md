@@ -151,6 +151,10 @@ Short prose, in the language named in your brief:
 - the verdict: **good** or **blocked**, and by what exactly;
 - findings by class, each with its evidence;
 - the "what I could not check, and why" line;
+- on round 2 or later, what the previous round found that you confirmed is now
+  fixed. That goes in the report's `verified_fixed` list, **not** in `findings`
+  — a fix is not a defect, and filing one as `clumsy` to make it visible both
+  misreports the class and buries the line that shows the loop converging;
 - spend: how many actions and minutes went.
 
 The full report sits in `<evidence>/<milestone>/verdict.json` and the evidence

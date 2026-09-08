@@ -30,8 +30,17 @@ acceptance:
   yesterday's data has all the awkward first-time steps already done, which is
   exactly where the findings are;
 - make the addresses in `acceptance.entrypoints` reachable;
+- **tear down any stand already running before it starts one** — free the port,
+  drop the container, whatever this stack needs. This is the failure that does
+  not announce itself: a previous stand still listening answers the health
+  check, so `up` exits 0 while serving the PREVIOUS BUILD, and the acceptance
+  run walks yesterday's code and reports on it. Found exactly that way. Kill by
+  port or by name, not only by a recorded pid — an interrupted run leaves the
+  pid file behind and the process alive;
 - exit non-zero if any of that failed. A stand that half came up produces an
-  acceptance run that half happened, reported as a pass.
+  acceptance run that half happened, reported as a pass. And a health check the
+  old stand can satisfy is not a health check: if `up` cannot prove it is
+  serving THIS build, it has not proved anything.
 
 `down` must tear it down **with its volumes**. A disposable stand that survived
 its run is a stand the next acceptance walks through stale data on.

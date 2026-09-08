@@ -52,7 +52,12 @@ Use the words from `plan.markers` rather than the English above — a project
 whose plan is Russian writes `**Готово, когда**` and `приёмка: да`, and the
 markers config is what tells every skill where to look.
 
-Mark state in the heading: `→` planned, `✅` done with the date. Finished
+**Mark state in the heading — `→` planned, `✅` done with the date — and that
+glyph is not decoration.** It is what `plan.markers.milestone` keys on, so it
+is what separates a milestone from a step and from an ordinary `##` section
+like "General rules". A heading-level match alone (`^##+`) catches all three
+and silently turns every step into a milestone, which costs exactly the
+distinction §1 calls load-bearing. Finished
 milestones stay in the file. The plan is the project's history as much as its
 future, and a milestone deleted after landing takes its reasoning with it.
 
@@ -103,7 +108,18 @@ default of "no".
   edit to the finished one. A closed milestone's text is what the acceptance
   agent was judged against; rewriting it destroys the record.
 - A "general rules" section at the top of the file, for constraints that apply
-  to every milestone below, saves repeating them in each one.
+  to every milestone below, saves repeating them in each one. It is a `##`
+  heading with **no status glyph**, so it is not a milestone and needs no "done
+  when" and no acceptance line — that is the case the status-glyph marker
+  exists to exclude.
+- **Commit the plan when you write it**, before the approval gate. A plan that
+  exists only in a conversation is lost with the conversation. The commit is
+  not the approval: approval is the owner saying yes, and `autopilot` asks when
+  it cannot tell that it has one.
+- **`**E2E:**` may say `none`** — but say which `none` it is. "This project has
+  no end-to-end suite" and "this milestone needs no e2e" read identically and
+  mean different things, so name the gate that does apply instead of leaving a
+  reader to wonder whether a suite was forgotten.
 
 ## Producing a plan
 

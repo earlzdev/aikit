@@ -94,6 +94,7 @@ LABELS: dict[str, dict[str, str]] = {
         "advisory": "For the owner (not blocking)",
         "defects": "Report defects",
         "lifted": "Lifted by the owner",
+        "verified_fixed": "Fixed since the previous round",
         "not_checked": "Could not check",
         "spend": "Spend",
         "round": "round",
@@ -117,6 +118,7 @@ LABELS: dict[str, dict[str, str]] = {
         "advisory": "Владельцу (не блокирует)",
         "defects": "Дефекты отчёта",
         "lifted": "Снято владельцем",
+        "verified_fixed": "Починено с прошлого круга",
         "not_checked": "Чего проверить не смог",
         "spend": "Расход",
         "round": "круг",
@@ -237,6 +239,11 @@ class Report:
     findings: tuple[Finding, ...]
     not_checked: str
     probes: dict[str, str]
+    # Round >= 2 confirms what the previous round found and the author has since
+    # fixed. It needs a home of its own: without one an agent files it as a
+    # finding — observed, filed as `clumsy` — which both misreports the class
+    # and buries the one line telling the owner the loop is converging.
+    verified_fixed: tuple[str, ...] = ()
     spend: dict[str, Any] = field(default_factory=dict)
 
 
@@ -318,6 +325,7 @@ def parse(data: Any) -> Report:
         findings=tuple(findings),
         not_checked=str(data.get("not_checked", "")).strip(),
         probes=probes,
+        verified_fixed=_strs(data.get("verified_fixed"), "verified_fixed"),
         spend=data.get("spend") or {},
     )
 
@@ -452,6 +460,10 @@ def render(report: Report, decision: Decision, lang: str = "en") -> str:
         lines += [f"## {label(lang, 'advisory')}", ""]
         lines += [_finding_line(f, lang) for f in decision.advisory] + [""]
 
+    if report.verified_fixed:
+        lines += [f"## {label(lang, 'verified_fixed')}", ""]
+        lines += [f"- {v}" for v in report.verified_fixed] + [""]
+
     lines += [
         f"## {label(lang, 'not_checked')}",
         "",
@@ -492,6 +504,9 @@ TEMPLATE: dict[str, Any] = {
         "evidence": ["screen:012-after-click.png"],
     },
     "beyond_checklist": dict.fromkeys(PROBES, "<what happened>"),
+    # Round >= 2 only: what the previous round found and you confirmed is fixed.
+    # These are not findings — do not file them as `clumsy` to get them seen.
+    "verified_fixed": [],
     "not_checked": "<what you could not check and why — this line is mandatory>",
     "spend": {"actions": 0, "minutes": 0},
 }

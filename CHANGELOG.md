@@ -2,6 +2,57 @@
 
 Newest first. What changed, and why.
 
+## 0.3.0 — 2026-09-08
+
+A minor rather than a patch: two config keys change meaning, and the acceptance
+report gains a field. Everything below was found by RUNNING the plugin for the
+first time — twelve components exercised, eight of them broken.
+
+- **Every skill's path to aikit's own binaries was broken, in every version
+  since 0.1.0.** They said `"$CLAUDE_PLUGIN_ROOT/bin/verdict"`, and that
+  variable is NOT set inside a Bash tool call — it resolved to `/bin/verdict`,
+  so the acceptance gate could never have run for anyone who installed the
+  plugin. The skills now resolve it in three steps (an optional top-level
+  `bin:` in `aikit.yml`, then the variable where it does exist, then the plugin
+  cache, newest version) and `/aikit:init` proves the result runs instead of
+  echoing the variable and hoping.
+- **The default `plan.markers.milestone` could not tell a milestone from a
+  step.** It shipped as `^##+\s`, which matches `##`, `###` and a plain
+  `## General rules` alike — 14 matches in a plan with 2 milestones. Milestones
+  are the unit that merges and goes through acceptance; steps are the unit that
+  goes through review; a marker matching both silently collapses the
+  distinction the plan format rests on. It is `^## [→✅]` now, keyed on the
+  status glyph, with a separate `step: "^### "`. Fixed in every example config.
+- **`/aikit:init`'s own proof step could never pass as printed.** It wrote the
+  probe report to `<root>/verdict.json` while the gate reads
+  `<root>/<milestone>/verdict.json`, and omitted the `mkdir -p`, so the
+  redirect failed outright. An operator following §5 literally would conclude
+  the gate was broken.
+- **`bin:` is now `plugin_root:`.** It holds the plugin's root directory — the
+  one containing `bin/` — and the old name invited pointing it at `bin/`
+  itself, which fails silently.
+- **`init` now covers what it previously left to invention:** rulebooks when a
+  project has none (omit the key rather than write a dangling path), files that
+  belong to no zone, and §4's harness stubs being skipped when no `acceptance`
+  block was configured.
+- **`plan` now says** that the plan is committed when written, that a
+  "general rules" section is deliberately not a milestone, and how to write
+  `**E2E:**` in a project that has no e2e suite at all.
+- **`docs/harness.md` now requires `stand.up` to tear down a previous stand
+  first.** Found by running it: an orphaned server kept the port, the new stand
+  failed to bind, and `up` still exited 0 because the health check was answered
+  by the OLD build. The acceptance run that followed would have walked stale
+  code and reported on it. A health check a previous stand can satisfy is not a
+  health check.
+- **The acceptance report gained `verified_fixed`.** On round 2 an agent had
+  nowhere to record "the previous round's finding is now fixed", so it filed
+  the confirmation as a `clumsy` finding — misreporting the class and burying
+  the one line that shows the loop converging. It is its own field and its own
+  section in the verdict now, and never blocks.
+- No behaviour change in the binaries beyond the path and report changes: the acceptance loop,
+  `autopilot` and `reviewer-strict` were all run end to end for the first time
+  in this version and needed none.
+
 ## 0.2.2 — 2026-09-08
 
 - **`bin/drive` was broken and is now fixed.** Playwright removed

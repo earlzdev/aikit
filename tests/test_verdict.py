@@ -307,3 +307,35 @@ class TestTreeIgnore(unittest.TestCase):
         plain = v.tree_digest(ROOT)
         wide = v.tree_digest(ROOT, ignore=("*",))
         self.assertNotEqual(plain, wide) if v.tree_state(ROOT)[1] else self.assertEqual(plain, wide)
+
+
+class TestVerifiedFixed(unittest.TestCase):
+    """Round >= 2 needs somewhere to say "this is fixed". Without it an agent
+    files the confirmation as a `clumsy` finding — observed in a real run."""
+
+    def test_absent_by_default(self):
+        self.assertEqual(report().verified_fixed, ())
+
+    def test_parsed_when_present(self):
+        r = report(verified_fixed=["Save now writes a row", "empty name refused"])
+        self.assertEqual(len(r.verified_fixed), 2)
+
+    def test_never_blocks(self):
+        self.assertFalse(v.gate(report(verified_fixed=["anything"])).blocked)
+
+    def test_rendered_in_its_own_section(self):
+        r = report(verified_fixed=["Save now writes a row"])
+        text = v.render(r, v.gate(r), "en")
+        self.assertIn("Fixed since the previous round", text)
+        self.assertIn("Save now writes a row", text)
+
+    def test_not_counted_as_a_finding(self):
+        r = report(verified_fixed=["fixed thing"])
+        self.assertEqual(v.gate(r).advisory, ())
+
+    def test_rejects_a_non_list(self):
+        with self.assertRaises(v.BadReport):
+            report(verified_fixed="a string, not a list")
+
+    def test_template_carries_the_key(self):
+        self.assertIn("verified_fixed", v.TEMPLATE)

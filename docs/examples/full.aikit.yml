@@ -10,7 +10,12 @@ language: ru
 plan:
   path: docs/PLAN.md
   markers:
-    milestone: "^##+\\s"
+    # A milestone heading carries its STATUS, and that glyph is what
+    # separates a milestone from a step and from a plain `##` section such
+    # as "General rules". `^##+\s` matched all three, which cost the
+    # distinction the whole plan format rests on.
+    milestone: "^## [→✅]"
+    step: "^### "
     done_when: "Готово, когда"
     acceptance: "приёмка"
     yes: "да"

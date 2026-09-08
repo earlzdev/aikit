@@ -18,7 +18,25 @@ HOW:  bring up a disposable stand, assemble a BRIEF (no diff!), run the
 -->
 
 Read `aikit.yml` first: `acceptance` (rounds, budget, stand, hands, truth,
-browser, entrypoints, seed), `plan.markers`, `tracker`, `evidence`, `language`.
+browser, entrypoints, seed, tripwire_ignore), `plan.markers`, `tracker`,
+`evidence`, `language`, and the optional `plugin_root`.
+
+## Finding aikit's own binaries
+
+```bash
+# aikit's binaries live in the INSTALLED PLUGIN, not in this project. Resolve
+# them once, in this order — `$CLAUDE_PLUGIN_ROOT` is set in some contexts and
+# NOT in a Bash tool call, so it can never be the only source.
+AIKIT="$(plugin_root_from_aikit_yml)"                                    # `plugin_root:` in aikit.yml, if set
+AIKIT="${AIKIT:-$CLAUDE_PLUGIN_ROOT}"                       # the variable, when present
+AIKIT="${AIKIT:-$(ls -d ~/.claude/plugins/cache/aikit/*/*/ 2>/dev/null | sort -V | tail -1)}"
+AIKIT="${AIKIT%/}"
+"$AIKIT/bin/verdict" --help >/dev/null || echo "aikit binaries not found — set bin: in aikit.yml"
+```
+
+`plugin_root_from_aikit_yml` above is shorthand: read the optional top-level `plugin_root:`
+key out of `aikit.yml` yourself. It is the directory holding `bin/`, not
+`bin/` itself. Set it when the plugin lives somewhere the glob does not reach.
 
 ## When this phase exists, and when it does not
 
@@ -91,7 +109,7 @@ report it and stop. Do not proceed to merge.
 **Fingerprint the working tree before you spawn anything:**
 
 ```
-"$CLAUDE_PLUGIN_ROOT/bin/verdict" tree [--tree-ignore <glob>]…   # record this digest
+"$AIKIT/bin/verdict" tree [--tree-ignore <glob>]…   # record this digest
 ```
 
 Pass `acceptance.tripwire_ignore` from `aikit.yml` as `--tree-ignore`. Using a
@@ -118,12 +136,14 @@ instead of a run that silently trails off.
 
 For round ≥ 2 add ONE line to the brief: "the previous round found these,
 check them again" — with the findings, and **no account of how they were
-fixed**.
+fixed**. Whatever the agent confirms is fixed comes back in the report's
+`verified_fixed` list rather than as a finding; a round that reports only
+`verified_fixed` and no blockers is the loop converging.
 
 ## Phase 2 — the gate
 
 ```
-"$CLAUDE_PLUGIN_ROOT/bin/verdict" gate <milestone> \
+"$AIKIT/bin/verdict" gate <milestone> \
   --tracker <tracker> --evidence-root <evidence> --lang <language> \
   --expect-tree <the digest from Phase 1>
 ```
@@ -183,7 +203,7 @@ the only way to see how often the acceptance agent is wrong.
 ## Phase 4 — close out
 
 ```
-"$CLAUDE_PLUGIN_ROOT/bin/verdict" gate <milestone> --write ...   # verdict into the tracker
+"$AIKIT/bin/verdict" gate <milestone> --write ...   # verdict into the tracker
 <acceptance.stand.down>                                          # the stand is disposable
 ```
 
