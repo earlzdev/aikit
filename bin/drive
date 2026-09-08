@@ -22,7 +22,7 @@ WHY it attaches over CDP rather than launching a browser. The stand owns the
       browser — it may be a container on the stand's network, which is the only
       place `localhost` and a valid Origin mean the right thing. This driver
       only needs an address. A project whose browser cannot be reached that way
-      keeps its own driver and points `acceptance.drive` at it.
+      keeps its own driver and points `acceptance.hands` at it.
 
 HOW:  the budget, the state file, target parsing and tree truncation are plain
       data and are unit-tested (`tests/test_drive.py`). Everything touching
@@ -189,7 +189,7 @@ class _Browser:
         except ImportError:  # pragma: no cover - environment, not logic
             raise SystemExit(
                 "[drive] playwright is not installed. Either `pip install playwright`, "
-                "or point `acceptance.drive` in aikit.yml at the project's own driver."
+                "or point `acceptance.hands` in aikit.yml at the project's own driver."
             ) from None
         self._pw = sync_playwright().start()
         try:
