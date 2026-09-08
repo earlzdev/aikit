@@ -12,6 +12,13 @@ Newest first. What changed, and why.
   what to do when `plan` is invoked with nothing to plan, and that anything
   the owner said when invoking `init` is an answer already given.
 
+## Unreleased
+
+- **`docs/pipeline.html`** — an animated trace of one task through the pipeline.
+  Round one fails on purpose, in both loops: an animation of a clean
+  straight-through run would misrepresent the thing, because the loop is the
+  product.
+
 ## 0.1.0 — 2026-09-07
 
 First release. The pipeline extracted from a project that had grown it in

@@ -13,6 +13,10 @@ plan  →  ┌─ step ─ review-loop ─┐          ┌───────�
          └─ step ─ review-loop ─┘          └──────────────────┘
 ```
 
+**[Watch it run →](https://claude.ai/code/artifact/00501ab2-7b5e-470b-b5bf-8a71054e279c)**
+— an animated trace of one task through the whole pipeline, including the
+rounds that fail. Source: [`docs/pipeline.html`](docs/pipeline.html).
+
 ## Why it exists
 
 A test suite checks what the author foresaw. That is a real limit, not a

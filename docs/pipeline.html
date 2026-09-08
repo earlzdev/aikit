@@ -1,0 +1,404 @@
+<title>The aikit Pipeline</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=JetBrains+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<style>
+/* Dark-first: the subject is an instrument watching a machine run unattended.
+   Bare :root is the dark palette; light is redefined for both the un-stamped
+   system-light case and the explicit toggle. */
+:root{
+  --bg:#121A23; --panel:#19232E; --panel2:#1F2C38; --line:#2C3B4A; --line2:#3A4C5E;
+  --ink:#E8EDF2; --ink2:#94A6B6; --ink3:#6B7E90;
+  --brass:#D19A4E; --brassdim:#7E5F2E;
+  --clean:#5FA88C; --block:#D2694F; --halt:#7E9BC4;
+  --shadow:0 1px 0 rgba(255,255,255,.03), 0 8px 24px rgba(0,0,0,.35);
+  --f-display:"Archivo","Helvetica Neue",Arial,sans-serif;
+  --f-body:"Source Serif 4",Georgia,"Times New Roman",serif;
+  --f-mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme:light){
+  :root:not([data-theme="dark"]){
+    --bg:#F4F5F3; --panel:#FFFFFF; --panel2:#ECEEEA; --line:#D6DAD5; --line2:#BFC6BE;
+    --ink:#18212A; --ink2:#5F6E7B; --ink3:#84919C;
+    --brass:#9A6A1E; --brassdim:#D2B685;
+    --clean:#2F7259; --block:#AF4426; --halt:#3F5F8C;
+    --shadow:0 1px 2px rgba(24,33,42,.06), 0 8px 20px rgba(24,33,42,.07);
+  }
+}
+:root[data-theme="light"]{
+  --bg:#F4F5F3; --panel:#FFFFFF; --panel2:#ECEEEA; --line:#D6DAD5; --line2:#BFC6BE;
+  --ink:#18212A; --ink2:#5F6E7B; --ink3:#84919C;
+  --brass:#9A6A1E; --brassdim:#D2B685;
+  --clean:#2F7259; --block:#AF4426; --halt:#3F5F8C;
+  --shadow:0 1px 2px rgba(24,33,42,.06), 0 8px 20px rgba(24,33,42,.07);
+}
+
+*{box-sizing:border-box}
+body{background:var(--bg); color:var(--ink); font-family:var(--f-body); line-height:1.6;
+     -webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px; margin:0 auto; padding:40px 24px 64px}
+
+/* ---- header ---- */
+header{display:flex; flex-wrap:wrap; gap:28px; align-items:flex-end;
+       justify-content:space-between; padding-bottom:22px; border-bottom:1px solid var(--line)}
+.eyebrow{font-family:var(--f-mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase;
+         color:var(--brass); margin:0 0 10px}
+h1{font-family:var(--f-display); font-weight:700; font-size:clamp(30px,4.4vw,46px);
+   letter-spacing:-.022em; line-height:1.04; margin:0; text-wrap:balance}
+.thesis{margin:12px 0 0; max-width:60ch; color:var(--ink2); font-size:16.5px}
+.thesis b{color:var(--ink); font-weight:600}
+.controls{display:flex; gap:8px; align-items:center}
+button{font-family:var(--f-mono); font-size:12px; letter-spacing:.02em; color:var(--ink);
+       background:var(--panel); border:1px solid var(--line2); border-radius:5px;
+       padding:8px 13px; cursor:pointer; transition:border-color .15s, color .15s}
+button:hover{border-color:var(--brass); color:var(--brass)}
+button:focus-visible{outline:2px solid var(--brass); outline-offset:2px}
+button[aria-pressed="true"]{color:var(--brass); border-color:var(--brass)}
+
+/* ---- main grid ---- */
+.stage{display:grid; grid-template-columns:minmax(300px,460px) minmax(320px,1fr);
+       gap:34px; margin-top:34px; align-items:start}
+@media (max-width:860px){ .stage{grid-template-columns:1fr} }
+
+.diagram{background:var(--panel); border:1px solid var(--line); border-radius:10px;
+         padding:12px 6px; box-shadow:var(--shadow); overflow-x:auto}
+svg{display:block; width:100%; height:auto; min-width:380px}
+
+/* ---- svg pieces ---- */
+.seg{fill:none; stroke:var(--line2); stroke-width:1.6}
+.seg.dashed{stroke-dasharray:3 5}
+.seg.on{stroke:var(--brass); stroke-width:2.4; stroke-dasharray:7 6; animation:march .55s linear infinite}
+@keyframes march{ to{ stroke-dashoffset:-13 } }
+.nbox{fill:var(--panel2); stroke:var(--line2); stroke-width:1.4; transition:fill .25s, stroke .25s}
+.nlabel{font-family:var(--f-display); font-weight:600; font-size:13.5px; letter-spacing:.03em;
+        fill:var(--ink2); transition:fill .25s}
+.nsub{font-family:var(--f-mono); font-size:9.5px; letter-spacing:.04em; fill:var(--ink3);
+      transition:fill .25s}
+.arclabel{font-family:var(--f-mono); font-size:9px; letter-spacing:.08em; fill:var(--ink3)}
+.node.active .nbox{fill:color-mix(in srgb, var(--brass) 14%, var(--panel2)); stroke:var(--brass)}
+.node.active .nlabel{fill:var(--ink)}
+.node.blocked .nbox{fill:color-mix(in srgb, var(--block) 16%, var(--panel2)); stroke:var(--block)}
+.node.blocked .nlabel{fill:var(--block)}
+.node.clean .nbox{fill:color-mix(in srgb, var(--clean) 15%, var(--panel2)); stroke:var(--clean)}
+.node.clean .nlabel{fill:var(--clean)}
+.node.halt .nbox{fill:color-mix(in srgb, var(--halt) 16%, var(--panel2)); stroke:var(--halt)}
+.node.halt .nlabel{fill:var(--halt)}
+.token{transition:transform .62s cubic-bezier(.45,.05,.2,1), opacity .22s}
+.token circle{fill:var(--brass)}
+.token .halo{fill:var(--brass); opacity:.22}
+
+/* ---- right column ---- */
+.side{display:flex; flex-direction:column; gap:18px}
+.card{background:var(--panel); border:1px solid var(--line); border-radius:10px; box-shadow:var(--shadow)}
+.state{padding:18px 20px; display:grid; grid-template-columns:1fr auto; gap:6px 16px; align-items:center}
+.state .k{font-family:var(--f-mono); font-size:10px; letter-spacing:.13em; text-transform:uppercase;
+          color:var(--ink3); grid-column:1/-1}
+.state .phase{font-family:var(--f-display); font-weight:700; font-size:25px; letter-spacing:-.015em;
+              margin:0; line-height:1.15}
+.pill{font-family:var(--f-mono); font-size:11px; letter-spacing:.05em; padding:4px 10px;
+      border-radius:20px; border:1px solid currentColor; white-space:nowrap}
+.pill.running{color:var(--brass)} .pill.blocked{color:var(--block)}
+.pill.clean{color:var(--clean)} .pill.halted{color:var(--halt)}
+.meta{grid-column:1/-1; display:flex; gap:22px; font-family:var(--f-mono); font-size:12px;
+      color:var(--ink2); border-top:1px solid var(--line); padding-top:12px; margin-top:4px;
+      font-variant-numeric:tabular-nums}
+.meta span b{color:var(--ink); font-weight:500}
+
+.log{padding:14px 4px 14px 0; height:320px; overflow-y:auto; font-family:var(--f-mono);
+     font-size:12.5px; line-height:1.85}
+.log ol{margin:0; padding:0 16px 0 18px; list-style:none}
+.log li{display:grid; grid-template-columns:56px 1fr; gap:12px; opacity:0; animation:in .3s forwards}
+@keyframes in{ to{ opacity:1 } }
+.log .tag{color:var(--ink3); text-align:right}
+.log .msg{color:var(--ink2); word-break:break-word}
+.log li.ok .msg{color:var(--clean)} .log li.block .msg{color:var(--block)}
+.log li.halt .msg{color:var(--halt)}
+.log li.cmd .tag{color:var(--brass)} .log li.cmd .msg{color:var(--ink)}
+
+.locks{padding:20px}
+.locks h2{font-family:var(--f-display); font-size:12px; letter-spacing:.13em; text-transform:uppercase;
+          color:var(--ink3); margin:0 0 14px; font-weight:600}
+.lock{display:grid; grid-template-columns:auto 1fr; gap:12px; padding:12px 0;
+      border-top:1px solid var(--line)}
+.lock:first-of-type{border-top:0; padding-top:0}
+.lock .no{font-family:var(--f-mono); font-size:10.5px; color:var(--block); border:1px solid var(--block);
+          border-radius:4px; padding:3px 7px; height:fit-content; white-space:nowrap}
+.lock p{margin:0; font-size:14.5px; color:var(--ink2)}
+.lock p b{color:var(--ink); font-weight:600}
+
+/* ---- stops ---- */
+.stops{margin-top:44px; padding-top:28px; border-top:1px solid var(--line)}
+.stops h2{font-family:var(--f-display); font-weight:700; font-size:20px; margin:0 0 6px;
+          letter-spacing:-.012em}
+.stops .lede{margin:0 0 22px; color:var(--ink2); max-width:66ch; font-size:15.5px}
+.stopgrid{display:grid; grid-template-columns:repeat(auto-fit,minmax(196px,1fr)); gap:14px}
+.stop{background:var(--panel); border:1px solid var(--line); border-left:2px solid var(--block);
+      border-radius:0 8px 8px 0; padding:14px 16px}
+.stop h3{font-family:var(--f-mono); font-size:11.5px; letter-spacing:.03em; color:var(--block);
+         margin:0 0 6px; font-weight:500}
+.stop p{margin:0; font-size:14px; color:var(--ink2); line-height:1.5}
+
+footer{margin-top:44px; padding-top:22px; border-top:1px solid var(--line);
+       display:flex; flex-wrap:wrap; gap:18px; justify-content:space-between; align-items:center}
+footer code{font-family:var(--f-mono); font-size:12.5px; color:var(--ink2);
+            background:var(--panel2); border:1px solid var(--line); border-radius:5px; padding:6px 11px}
+footer a{color:var(--brass); text-decoration:none; font-family:var(--f-mono); font-size:12.5px}
+footer a:hover{text-decoration:underline}
+.sr{position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap}
+
+@media (prefers-reduced-motion:reduce){
+  .token{transition:none} .seg.on{animation:none} .log li{animation:none; opacity:1}
+}
+</style>
+
+<div class="wrap">
+<header>
+  <div>
+    <p class="eyebrow">aikit · unattended delivery</p>
+    <h1>The aikit Pipeline</h1>
+    <p class="thesis">One task, from request to merge, with nobody watching. Two gates stand in
+      its way, and <b>neither can be talked around</b> — the reviewer has no tool that edits,
+      and the acceptance agent is never shown the code.</p>
+  </div>
+  <div class="controls">
+    <button id="play" aria-pressed="true">⏸ Pause</button>
+    <button id="restart">↻ Restart</button>
+    <button id="speed" aria-pressed="false">2×</button>
+  </div>
+</header>
+
+<div class="stage">
+  <div class="diagram">
+    <svg viewBox="0 0 480 748" role="img" aria-labelledby="svgtitle">
+      <title id="svgtitle">The pipeline: request, plan, owner gate, then each step through the
+        review loop and each milestone through the acceptance loop before it closes.</title>
+
+      <!-- the rail the run travels -->
+      <path class="seg" id="s1" d="M144,70 L144,122"/>
+      <path class="seg" id="s2" d="M144,170 L144,222"/>
+      <path class="seg" id="s3" d="M144,270 L144,348"/>
+      <path class="seg" id="s4" d="M144,396 L144,452"/>
+      <path class="seg" id="s5" d="M144,500 L144,572"/>
+      <path class="seg" id="s6" d="M144,620 L144,676"/>
+
+      <!-- the loops, nested on the right. these are the product. -->
+      <path class="seg" id="L1" d="M330,476 C368,476 374,462 374,432 C374,402 368,380 330,380"/>
+      <path class="seg" id="L2" d="M330,596 C406,596 416,578 416,486 C416,394 406,364 330,364"/>
+      <path class="seg dashed" id="L3" d="M330,700 C440,700 452,676 452,532 C452,388 440,352 330,352"/>
+      <text class="arclabel" x="387" y="432" transform="rotate(90 387 432)" text-anchor="middle">fix · next step</text>
+      <text class="arclabel" x="429" y="486" transform="rotate(90 429 486)" text-anchor="middle">blocked · fix</text>
+      <text class="arclabel" x="465" y="532" transform="rotate(90 465 532)" text-anchor="middle">next milestone</text>
+
+      <!-- both loops can end the run instead of going round again -->
+      <path class="seg dashed" id="X1" d="M110,476 C82,476 96,506 96,528"/>
+      <path class="seg dashed" id="X2" d="M110,596 C82,596 96,566 96,544"/>
+
+      <g class="node" id="n-stop">
+        <rect class="nbox" x="4" y="512" width="92" height="48" rx="7"/>
+        <text class="nlabel" x="50" y="531" text-anchor="middle">STOP</text>
+        <text class="nsub" x="50" y="546" text-anchor="middle">report · wait</text>
+      </g>
+
+      <g class="node" id="n-request">
+        <rect class="nbox" x="110" y="22" width="220" height="48" rx="7"/>
+        <text class="nlabel" x="170" y="51">REQUEST</text>
+      </g>
+      <g class="node" id="n-plan">
+        <rect class="nbox" x="110" y="122" width="220" height="48" rx="7"/>
+        <text class="nlabel" x="170" y="145">PLAN</text>
+        <text class="nsub" x="170" y="160">milestones · steps</text>
+      </g>
+      <g class="node" id="n-gate">
+        <rect class="nbox" x="110" y="222" width="220" height="48" rx="7"/>
+        <text class="nlabel" x="170" y="245">OWNER GATE</text>
+        <text class="nsub" x="170" y="260">the one human stop</text>
+      </g>
+      <g class="node" id="n-step">
+        <rect class="nbox" x="110" y="348" width="220" height="48" rx="7"/>
+        <text class="nlabel" x="170" y="371">STEP</text>
+        <text class="nsub" x="170" y="386">implement · verify</text>
+      </g>
+      <g class="node" id="n-review">
+        <rect class="nbox" x="110" y="452" width="220" height="48" rx="7"/>
+        <text class="nlabel" x="170" y="475">REVIEW LOOP</text>
+        <text class="nsub" x="170" y="490">no Write tool</text>
+      </g>
+      <g class="node" id="n-accept">
+        <rect class="nbox" x="110" y="572" width="220" height="48" rx="7"/>
+        <text class="nlabel" x="170" y="595">ACCEPTANCE LOOP</text>
+        <text class="nsub" x="170" y="610">no diff</text>
+      </g>
+      <g class="node" id="n-close">
+        <rect class="nbox" x="110" y="676" width="220" height="48" rx="7"/>
+        <text class="nlabel" x="170" y="699">CLOSE</text>
+        <text class="nsub" x="170" y="714">✅ plan · PR</text>
+      </g>
+
+      <g class="token" id="token" style="transform:translate(144px,46px)">
+        <circle class="halo" r="11"/><circle r="5.5"/>
+      </g>
+    </svg>
+  </div>
+
+  <div class="side">
+    <div class="card state">
+      <span class="k">Now running</span>
+      <p class="phase" id="phase">Request</p>
+      <span class="pill running" id="pill">running</span>
+      <div class="meta">
+        <span>milestone <b id="ms">—</b></span>
+        <span>round <b id="round">—</b></span>
+        <span>acceptance <b id="acc">приёмка: да</b></span>
+      </div>
+    </div>
+
+    <div class="card log"><ol id="log"></ol></div>
+
+    <div class="card locks">
+      <h2>Why the gates hold</h2>
+      <div class="lock">
+        <span class="no">no Write</span>
+        <p><b>The reviewer cannot patch what it finds.</b> Its tool list has no Write and no Edit
+          at all, so independence is enforced by the harness — not by an instruction it could
+          talk itself out of on a long run.</p>
+      </div>
+      <div class="lock">
+        <span class="no">no diff</span>
+        <p><b>The acceptance agent never sees the code.</b> Its brief is four things and contains
+          no file name. An agent holding the diff inherits the author's blindness and checks what
+          the code says instead of what a person needs.</p>
+      </div>
+      <div class="lock">
+        <span class="no">exit 1</span>
+        <p><b>The gate is a program, not a paragraph.</b> An incomplete report — no “what I could
+          not check” line, a passed item with no evidence — blocks exactly like a breakage does.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<section class="stops">
+  <h2>Where it stops instead of guessing</h2>
+  <p class="lede">Unattended is not the same as unsupervised. Each of these ends the run, keeps
+    every fix made so far, and hands the owner a report with the exact next action — rather than
+    picking an interpretation and building on it.</p>
+  <div class="stopgrid">
+    <div class="stop"><h3>round cap spent</h3><p>Three review rounds, or three acceptance rounds, with blocking issues still open.</p></div>
+    <div class="stop"><h3>ping-pong</h3><p>A reviewer reversing an earlier round's finding. Both positions go to the owner; no side is picked by editing.</p></div>
+    <div class="stop"><h3>stand won't come up</h3><p>Or a budget runs out mid-acceptance. That is “could not”, never “good”.</p></div>
+    <div class="stop"><h3>the scope grew</h3><p>Work the plan doesn't mention is a new milestone to approve, not a bigger one to finish.</p></div>
+    <div class="stop"><h3>the plan is wrong</h3><p>The milestone can't be built as written, or means something else. Say so; don't build your own reading of it.</p></div>
+    <div class="stop"><h3>anything irreversible</h3><p>Production, deleted data, a force-push, a rotated credential — unless the plan named it.</p></div>
+  </div>
+</section>
+
+<footer>
+  <code>/plugin marketplace add earlzdev/aikit</code>
+  <a href="https://github.com/earlzdev/aikit">github.com/earlzdev/aikit →</a>
+</footer>
+</div>
+
+<script>
+// x=144 is the rail; the marker rides in its own gutter, clear of every label.
+const AT = {request:[144,46], plan:[144,146], gate:[144,246], step:[144,372],
+            review:[144,476], accept:[144,596], close:[144,700], stop:[50,536]};
+
+// One full run: two steps, a review round that finds something, an acceptance
+// round that blocks. A clean straight-through run would misrepresent the thing —
+// the loop is the product.
+const RUN = [
+ {at:'request', seg:null,  dur:1600, phase:'Request', status:'running', ms:'—', round:'—',
+  log:[['$','/aikit:plan  бронь: отмена в разговоре','cmd']]},
+ {at:'plan', seg:'s1', dur:2500, phase:'Planning', status:'running',
+  log:[['plan','docs/PLAN.md · 3 milestones written'],['plan','Э57 · 2 steps · приёмка: да']]},
+ {at:'gate', seg:'s2', dur:2600, phase:'Owner gate', status:'halted',
+  log:[['gate','waiting for the owner','halt'],['gate','approved','ok']]},
+ {at:'step', seg:'s3', dur:1900, phase:'Э57.1', status:'running', ms:'Э57', round:'—',
+  log:[['step','parser accepts the card block'],['verify','uv run pytest -q → ok','ok']]},
+ {at:'review', seg:'s4', dur:2200, phase:'Review', status:'blocked', round:'1 / 3',
+  log:[['review','round 1 of 3 · reviewer-strict'],['review','VERDICT: 1 critical, 1 high','block']]},
+ {at:'step', seg:'L1', dur:1800, phase:'Fix', status:'running', round:'—',
+  log:[['fix','minimal diff, nothing else'],['verify','uv run pytest -q → ok','ok']]},
+ {at:'review', seg:'s4', dur:1900, phase:'Review', status:'clean', round:'2 / 3',
+  log:[['review','round 2 of 3 · a fresh instance'],['review','VERDICT: CLEAN','ok']]},
+ {at:'step', seg:'L1', dur:1800, phase:'Э57.2', status:'running', round:'—',
+  log:[['step','the web form writes it back'],['verify','npm run check → ok','ok']]},
+ {at:'review', seg:'s4', dur:1700, phase:'Review', status:'clean', round:'1 / 3',
+  log:[['review','round 1 of 3'],['review','VERDICT: CLEAN','ok']]},
+ {at:'accept', seg:'s5', dur:3000, phase:'Acceptance', status:'blocked', round:'1 / 3',
+  log:[['accept','stand up · disposable, seeded empty'],
+       ['accept','brief = 4 items. no diff, no file names.'],
+       ['accept','не работает — «Сохранить» не жмётся','block'],
+       ['gate','verdict gate Э57 → exit 1','block']]},
+ {at:'step', seg:'L2', dur:1900, phase:'Fix', status:'running', round:'—',
+  log:[['fix','the author fixes. the agent only reports.'],['verify','npm run check → ok','ok']]},
+ {at:'review', seg:'s4', dur:1400, phase:'Review', status:'clean', round:'1 / 3',
+  log:[['review','VERDICT: CLEAN','ok']]},
+ {at:'accept', seg:'s5', dur:2700, phase:'Acceptance', status:'clean', round:'2 / 3',
+  log:[['accept','round 2 · the whole run again, fresh agent'],
+       ['gate','verdict gate Э57 → exit 0','ok'],['accept','ГОДИТСЯ','ok']]},
+ {at:'close', seg:'s6', dur:2600, phase:'Close', status:'clean', round:'—',
+  log:[['close','verify_all → ok','ok'],
+       ['close','✅ Э57 into the plan · the same commit as the work'],
+       ['close','PR opened','ok']]},
+ {at:'step', seg:'L3', dur:2000, phase:'Э58', status:'running', ms:'Э58', round:'—',
+  log:[['next','Э58 · приёмка: нет · no acceptance phase here']]},
+];
+
+const $ = id => document.getElementById(id);
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+let i = 0, timer = null, rate = 1, playing = false, acc = 'приёмка: да';
+
+function paint(s){
+  document.querySelectorAll('.node').forEach(n => n.classList.remove('active','blocked','clean','halt'));
+  document.querySelectorAll('.seg').forEach(p => p.classList.remove('on'));
+  const node = $('n-' + s.at);
+  node.classList.add(s.status === 'blocked' ? 'blocked' : s.status === 'clean' ? 'clean'
+                   : s.status === 'halted' ? 'halt' : 'active');
+  if (s.seg) $(s.seg).classList.add('on');
+  const [x,y] = AT[s.at];
+  $('token').style.transform = `translate(${x}px,${y}px)`;
+
+  $('phase').textContent = s.phase;
+  $('pill').textContent = s.status;
+  $('pill').className = 'pill ' + s.status;
+  if (s.ms) $('ms').textContent = s.ms;
+  if (s.round) $('round').textContent = s.round;
+  if (s.ms === 'Э58') acc = 'приёмка: нет';
+  if (s.at === 'request') acc = 'приёмка: да';
+  $('acc').textContent = acc;
+
+  const ol = $('log');
+  s.log.forEach(([tag,msg,kind]) => {
+    const li = document.createElement('li');
+    if (kind) li.className = kind;
+    const t = document.createElement('span'); t.className = 'tag'; t.textContent = tag;
+    const m = document.createElement('span'); m.className = 'msg'; m.textContent = msg;
+    li.append(t,m); ol.append(li);
+  });
+  while (ol.children.length > 40) ol.firstElementChild.remove();
+  ol.parentElement.scrollTop = ol.parentElement.scrollHeight;
+}
+
+function step(){
+  if (i >= RUN.length){ i = 0; $('log').replaceChildren(); }
+  const s = RUN[i++];
+  paint(s);
+  if (playing) timer = setTimeout(step, s.dur / rate);
+}
+function play(on){
+  playing = on;
+  $('play').textContent = on ? '⏸ Pause' : '▶ Play';
+  $('play').setAttribute('aria-pressed', String(on));
+  clearTimeout(timer);
+  if (on) timer = setTimeout(step, 260);
+}
+$('play').onclick = () => play(!playing);
+$('restart').onclick = () => { clearTimeout(timer); i = 0; $('log').replaceChildren();
+                               acc = 'приёмка: да'; step(); };
+$('speed').onclick = e => { rate = rate === 1 ? 2 : 1; e.currentTarget.textContent = rate === 1 ? '2×' : '1×';
+                            e.currentTarget.setAttribute('aria-pressed', String(rate === 2)); };
+
+// At rest the page is already composed and readable: the first state is painted
+// immediately, and only then does it start moving.
+paint(RUN[i++]);
+if (reduce) play(false); else play(true);
+</script>
