@@ -18,6 +18,11 @@ Newest first. What changed, and why.
   Round one fails on purpose, in both loops: an animation of a clean
   straight-through run would misrepresent the thing, because the loop is the
   product.
+- **`docs/pipeline-{dark,light}.gif`** for the README, built from
+  `docs/pipeline-capture.html` by `docs/capture.mjs` — headless Chrome over CDP
+  with no npm install, drawing frame `n` and screenshotting it rather than
+  screen-recording a clock. Milestones are numbered `E57` there rather than
+  `Э57`: at that size the Cyrillic `Э` reads as a `3`.
 
 ## 0.1.0 — 2026-09-07
 

@@ -7,15 +7,16 @@ Plan the work into numbered milestones. Take each step through a reviewer that
 **cannot edit code**. Take each finished milestone through an acceptance agent
 that **never sees the diff**. Nothing passes on the author's own word.
 
-```
-plan  →  ┌─ step ─ review-loop ─┐          ┌──────────────────┐
-         ├─ step ─ review-loop ─┼─ milestone ─ acceptance-loop ─ close ─→ next
-         └─ step ─ review-loop ─┘          └──────────────────┘
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/pipeline-dark.gif">
+  <img alt="One task moving through the aikit pipeline: plan, owner gate, then each step through the review loop and the milestone through the acceptance loop before it closes. Round one fails in both loops." src="docs/pipeline-light.gif" width="900">
+</picture>
 
-**[Watch it run →](https://claude.ai/code/artifact/00501ab2-7b5e-470b-b5bf-8a71054e279c)**
-— an animated trace of one task through the whole pipeline, including the
-rounds that fail. Source: [`docs/pipeline.html`](docs/pipeline.html).
+Round one fails in both loops above, on purpose — the loop is the product, and a
+clean straight-through run would show you the opposite of what this does.
+[**Watch it interactively →**](https://claude.ai/code/artifact/00501ab2-7b5e-470b-b5bf-8a71054e279c)
+· regenerate the GIF with `node docs/capture.mjs dark out/frames` (see
+[`docs/capture.mjs`](docs/capture.mjs)).
 
 ## Why it exists
 
