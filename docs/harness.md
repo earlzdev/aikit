@@ -105,6 +105,13 @@ right thing. The driver must accept the verbs listed in `agents/acceptance.md`
 and must enforce the budgets: an unenforced budget is how a run trails off with
 no "got this far, and why" line.
 
+**And it must actually write its captures**, into `<evidence>/<milestone>/`
+under exactly the names it reports back — the same `evidence` root the gate is
+given, which is why the brief carries it. The gate opens that directory and
+checks every `screen:` it is shown is really there, so a driver that reports a
+name it did not write blocks the merge through no fault of the run. `bin/drive`
+does this already; a substitute has to.
+
 ## Worked example
 
 The project this pipeline grew in has three files under `scripts/acceptance/`:
@@ -126,6 +133,11 @@ stack — `snapshot_load` gives a byte-identical start state every run, which is
 exactly the property `stand.up` is asking for. The screen index plays the part
 of the accessibility tree; tap, type and swipe are the hands.
 
+MCP hands do not write files the way a driver does, so the capture is a
+deliberate step here rather than a side effect: take the screenshot to
+`<evidence>/<milestone>/<name>.png` and report that name. A run that photographs
+nothing cannot pay for a single checklist item.
+
 Two things get weaker there and are worth knowing rather than discovering:
 a UI tree made of resource ids (`@id/btn_save`) leaks developer names the web's
 label tree does not, and an unrestricted `adb shell` can write, so a truth
@@ -134,4 +146,10 @@ record that you accepted the weaker guarantee.
 
 **A CLI or a service with no interface.** The hands are the command itself and
 the truth source is what it wrote. Set `--no-db` on the gate when there is no
-store to read; everything else is unchanged.
+store to read.
+
+The screenshot requirement does not lift, though, and there is no flag that
+lifts it — a terminal is a screen. Capture the session (`script`, `asciinema`,
+or simply redirecting the run's output) into `<evidence>/<milestone>/` under the
+name the report cites. The point was never the image format: it is that a claim
+has an artefact behind it that the run had to produce.

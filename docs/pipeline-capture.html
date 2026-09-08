@@ -112,8 +112,8 @@ svg{width:356px; height:auto}
         <text class="nlabel" x="170" y="371">STEP</text>
         <text class="nsub" x="170" y="386">implement · verify</text></g>
       <g class="node" id="n-review"><rect class="nbox" x="110" y="452" width="220" height="48" rx="7"/>
-        <text class="nlabel" x="170" y="475">REVIEW LOOP</text>
-        <text class="nsub" x="170" y="490">no Write tool</text></g>
+        <text class="nlabel" x="170" y="475">STEP LOOP</text>
+        <text class="nsub" x="170" y="490">implementer · fresh reviewer</text></g>
       <g class="node" id="n-accept"><rect class="nbox" x="110" y="572" width="220" height="48" rx="7"/>
         <text class="nlabel" x="170" y="595">ACCEPTANCE LOOP</text>
         <text class="nsub" x="170" y="610">no diff</text></g>
@@ -138,10 +138,10 @@ const RUN=[
  {at:'request',seg:null,hold:5,phase:'Request',st:'running',ms:'—',rd:'—',
   log:[['$','/aikit:plan  бронь: отмена в разговоре','cmd']]},
  {at:'plan',seg:'s1',hold:9,phase:'Planning',st:'running',
-  log:[['plan','docs/PLAN.md · 3 milestones written'],['plan','E57 · приёмка: да']]},
+  log:[['plan','docs/PLAN.md · 3 milestones written'],['plan','M57 · приёмка: да']]},
  {at:'gate',seg:'s2',hold:11,phase:'Owner gate',st:'halted',
   log:[['gate','waiting for the owner','halt'],['gate','approved','ok']]},
- {at:'step',seg:'s3',hold:8,phase:'E57.1',st:'running',ms:'E57',
+ {at:'step',seg:'s3',hold:8,phase:'M57.1',st:'running',ms:'M57',
   log:[['step','parser accepts the card block'],['verify','uv run pytest -q → ok','ok']]},
  {at:'review',seg:'s4',hold:11,phase:'Review',st:'blocked',rd:'1 / 3',
   log:[['review','round 1 of 3 · reviewer-strict'],['review','VERDICT: 1 critical, 1 high','block']]},
@@ -153,18 +153,18 @@ const RUN=[
   log:[['accept','stand up · disposable, seeded empty'],
        ['accept','brief = 4 items. no diff, no file names.'],
        ['accept','не работает — «Сохранить» не жмётся','block'],
-       ['gate','verdict gate E57 → exit 1','block']]},
+       ['gate','verdict gate M57 → exit 1','block']]},
  {at:'step',seg:'L2',hold:8,phase:'Fix',st:'running',rd:'—',
-  log:[['fix','the author fixes. the agent only reports.'],['verify','npm run check → ok','ok']]},
+  log:[['fix','a fresh step-loop fixes. the agent only reports.'],['verify','npm run check → ok','ok']]},
  {at:'review',seg:'s4',hold:6,phase:'Review',st:'clean',rd:'1 / 3',log:[['review','VERDICT: CLEAN','ok']]},
  {at:'accept',seg:'s5',hold:11,phase:'Acceptance',st:'clean',rd:'2 / 3',
   log:[['accept','round 2 · the whole run again, fresh agent'],
-       ['gate','verdict gate E57 → exit 0','ok'],['accept','ГОДИТСЯ','ok']]},
+       ['gate','verdict gate M57 → exit 0','ok'],['accept','ГОДИТСЯ','ok']]},
  {at:'close',seg:'s6',hold:12,phase:'Close',st:'clean',rd:'—',
-  log:[['close','verify_all → ok','ok'],['close','✅ E57 · same commit as the work'],
+  log:[['close','verify_all → ok','ok'],['close','✅ M57 · same commit as the work'],
        ['close','PR opened','ok']]},
- {at:'step',seg:'L3',hold:9,phase:'E58',st:'running',ms:'E58',
-  log:[['next','E58 · приёмка: нет · no acceptance phase']]},
+ {at:'step',seg:'L3',hold:9,phase:'M58',st:'running',ms:'M58',
+  log:[['next','M58 · приёмка: нет · no acceptance phase']]},
 ];
 const MOVE=5, LINES=[];              // flattened log, revealed one line at a time
 const F=[];                          // one entry per GIF frame

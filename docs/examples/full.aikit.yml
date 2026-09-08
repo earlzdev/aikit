@@ -47,12 +47,20 @@ verify_all: >-
 
 review:
   reviewer: reviewer-strict
+  # Both models left inherited, deliberately — the keys would go here:
+  #   model:
+  #     implementer: opus
+  #     reviewer: sonnet
+  # This project's reviewer is its only gate before merge, and its steps are
+  # large enough that a weaker implementer costs more in extra review rounds
+  # than it saves per turn.
   rounds:
     develop: 3
     fix: 2
 
 acceptance:
   rounds: 3
+  # model: sonnet     # omit the key entirely to inherit the run's model
   budget:
     actions: 120
     minutes: 45

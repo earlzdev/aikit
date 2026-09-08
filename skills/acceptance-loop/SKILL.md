@@ -1,12 +1,12 @@
 ---
 name: acceptance-loop
-description: After review-loop, put a finished milestone through acceptance — a separate agent walks the feature by hand on a disposable stand, without the diff, and says whether it is fit for a person. Runs only on a milestone whose plan line says acceptance is required.
+description: After step-loop, put a finished milestone through acceptance — a separate agent walks the feature by hand on a disposable stand, without the diff, and says whether it is fit for a person. Runs only on a milestone whose plan line says acceptance is required.
 ---
 
 # acceptance-loop — the second check beside review: is this fit to use?
 
 <!--
-WHAT: the phase between review-loop and merge. Review answers "is the code
+WHAT: the phase between step-loop and merge. Review answers "is the code
       right?". Acceptance answers a different question: "can this be used?"
 WHY:  a test suite checks what the author foresaw, which is why the findings
       that matter keep arriving through the owner's own eyes while the suite
@@ -14,12 +14,16 @@ WHY:  a test suite checks what the author foresaw, which is why the findings
       JUDGEMENT.
 HOW:  bring up a disposable stand, assemble a BRIEF (no diff!), run the
       `acceptance` agent, put its report through a mechanical gate, and decide
-      whether the milestone may merge. Rounds work like review-loop's.
+      whether the milestone may merge. Rounds work like step-loop's.
 -->
 
-Read `aikit.yml` first: `acceptance` (rounds, budget, stand, hands, truth,
-browser, entrypoints, seed, tripwire_ignore), `plan.markers`, `tracker`,
+Read `aikit.yml` first: `acceptance` (rounds, model, budget, stand, hands,
+truth, browser, entrypoints, seed, tripwire_ignore), `plan.markers`, `tracker`,
 `evidence`, `language`, and the optional `plugin_root`.
+
+`acceptance.model` is optional: pass it as the spawn's model when set, and
+otherwise spawn without an override so the agent inherits. Do not pick one
+yourself — see `docs/config.md`.
 
 ## Finding aikit's own binaries
 
@@ -31,7 +35,7 @@ AIKIT="$(plugin_root_from_aikit_yml)"                                    # `plug
 AIKIT="${AIKIT:-$CLAUDE_PLUGIN_ROOT}"                       # the variable, when present
 AIKIT="${AIKIT:-$(ls -d ~/.claude/plugins/cache/aikit/*/*/ 2>/dev/null | sort -V | tail -1)}"
 AIKIT="${AIKIT%/}"
-"$AIKIT/bin/verdict" --help >/dev/null || echo "aikit binaries not found — set bin: in aikit.yml"
+"$AIKIT/bin/verdict" --help >/dev/null || echo "aikit binaries not found — set plugin_root: in aikit.yml"
 ```
 
 `plugin_root_from_aikit_yml` above is shorthand: read the optional top-level `plugin_root:`
@@ -83,13 +87,17 @@ stateless; the whole context is handed over on every run):
 3. the owner's scenario, in words;
 4. the hands and the truth source — from `acceptance.hands` and
    `acceptance.truth`, whether those are commands, MCP tools or a skill —
-   plus `acceptance.entrypoints`, `acceptance.seed` and the output language,
-   with **no project file names**.
+   plus `acceptance.entrypoints`, `acceptance.seed`, the output language, and
+   **the evidence root** from `evidence`, with **no project file names**. The
+   root is a directory the run writes to, not a fact about the code, so it
+   costs the no-diff rule nothing — and without it the agent captures where the
+   gate does not look, which fails a blameless run.
 
-The agent holds every tool the project has; item 4 tells it which of them reach
-THIS product, so it does not spend a budget discovering that. Its blindness to
-the implementation is not its tool list — a shell alone would defeat that — it
-is this brief plus a gate that accepts only evidence the product produced.
+Nothing in the project is forbidden to the agent; item 4 tells it which tools
+reach THIS product, so it does not spend a budget discovering that. Its
+blindness to the implementation is not its tool list — a shell alone would
+defeat that — it is this brief plus a gate that accepts only evidence the
+product produced.
 
 While assembling the brief, reread it as a stranger would. If it lets anyone
 work out WHAT WAS CHANGED IN THE CODE, cut that out.
@@ -106,6 +114,33 @@ report it and stop. Do not proceed to merge.
 
 ## Phase 1 — round N of the cap
 
+**Put the previous round's captures out of reach first.** From round 2 on,
+everything round 1 wrote is still sitting in `<evidence>/<milestone>/`, and the
+gate accepts any capture it finds there. A round that took no actions at all
+can pass by citing the previous round's screenshots — and rounds 2 and 3 exist
+precisely *because* round 1 blocked, so this lands on exactly the runs that
+matter. Archive them:
+
+```sh
+# Before every round, including the first: a stopped run leaves captures too.
+# POSIX sh on purpose — `compgen` is a bash builtin and this block is run by
+# whatever shell the orchestrator has, which on macOS is zsh. A bash-ism here
+# fails silently: the guard goes false, nothing is archived, and the hole this
+# closes is quietly open again. No test in this project can catch that.
+prev="<evidence>/<milestone>"
+archive="$prev/round-$((N-1))"
+mkdir -p "$archive"
+find "$prev" -maxdepth 1 -type f -exec mv -n {} "$archive/" ';'
+rmdir "$archive" 2>/dev/null || true      # nothing to archive; leave no empties
+```
+
+`mv -n` never overwrites: re-entering a round — a respawn, a restarted stand —
+must not replace round 1's captures with round 2's. Archived, not deleted: the
+screenshots are the human's record of what happened, and the gate only ever
+looks at plain files directly inside `<evidence>/<milestone>/`, so a
+subdirectory is invisible to it. The agent writes a fresh `verdict.json`
+itself, so nothing it needs is lost.
+
 **Fingerprint the working tree before you spawn anything:**
 
 ```
@@ -119,15 +154,27 @@ Anything git already ignores never counts; this is for generated files a
 project happens to track. `verdict tree --show` lists what is currently dirty
 if you need to work out what to exclude.
 
-The acceptance agent holds every tool this project has, editing tools included.
-"You only report, the author fixes" is an instruction it could talk itself out
-of on a long run, so Phase 2 hands this digest back to the gate, which blocks
+The acceptance agent can edit this project — a shell alone is enough for that.
+"You only report, someone else fixes" is an instruction it could talk itself
+out of on a long run, so Phase 2 hands this digest back to the gate, which blocks
 if the tree moved while the run was happening. A run that edited the code it
 was judging is void, not passed.
 
 Announce it: "Acceptance, round N of `<cap>`." Spawn the `acceptance` agent
 (Agent tool) with the four-part brief, the round number, and the budget from
 `acceptance.budget` (`--max-actions`, `--minutes`).
+
+`acceptance.hands` and `acceptance.truth` are what stop it hunting for a way in:
+the agent has every tool the project has, and without the brief it would spend
+budget working out which of them reach this product.
+
+*(A note for whoever tries to make this cheaper: the agent's inherited tool
+schemas are a real per-turn cost, and there is currently no way to trim them.
+`tools:` in an agent's frontmatter is static, while `hands` and `truth` are
+per-project — a fixed list cannot name the MCP tools the Android path depends
+on — and the spawn itself takes no tool list. Do not write an instruction that
+says otherwise; 0.4.0 shipped one for three review rounds before anyone noticed
+it could not be followed.)*
 
 There are three spend limits and they are not a suggestion: whatever cap the
 stand's seed applies, the action count, and the run timeout (both enforced
@@ -145,15 +192,26 @@ fixed**. Whatever the agent confirms is fixed comes back in the report's
 ```
 "$AIKIT/bin/verdict" gate <milestone> \
   --tracker <tracker> --evidence-root <evidence> --lang <language> \
-  --expect-tree <the digest from Phase 1>
+  --expect-tree <the digest from Phase 1> \
+  --tree-ignore <glob>…          # THE SAME globs Phase 1 used
 ```
+
+**The `--tree-ignore` globs must match Phase 1's exactly.** The gate does not
+remember them: it recomputes the digest from scratch, so a Phase 1 that ignored
+`*.pyc` and a Phase 2 that did not are comparing two fingerprints built by
+different rules, and they differ even when nothing moved. That reports "the
+working tree changed during the acceptance run" on a run that changed nothing —
+the same `.pyc` failure `tripwire_ignore` was added to prevent, one level up.
 
 The gate is mechanical and returns non-zero in three cases:
 
 - there is a finding of class **broken** or **lies**;
 - **the report is defective**: no "what I could not check" line, one of the
-  five probes unanswered, a checklist item marked passed with no evidence, not
-  one screenshot or not one database row;
+  five probes unanswered, a checklist item marked passed with no evidence, a
+  checklist item that did not pass at all, evidence on a passed item that is
+  neither `screen:` nor `db:`, a `db:` with nothing after it, a `screen:` that
+  is not one plain capture filename, or a `screen:` naming a file that is not
+  in `<evidence>/<milestone>/` — a capture that is not on disk did not happen;
 - **the working tree moved during the run** — or could not be fingerprinted at
   all, which fails closed for the same reason a stand that did not come up is
   "could not" and never "good". The defect names the paths that moved, so a
@@ -172,8 +230,17 @@ Class **clumsy** does not hold the merge — it goes to the owner as a line.
 
 ## Phase 3 — fixing, and the round decision
 
-**The AUTHOR fixes** — you, the orchestrator. The acceptance agent only
-reports. Same separation of roles as review-loop. After each fix:
+**The acceptance agent only reports; someone else fixes.** Same separation of
+roles as step-loop — and, as there, the fixing is not yours to do by hand. The
+milestone's code is finished by the time acceptance runs, so no implementer is
+still holding it: send each blocking finding into a **fresh `step-loop`** as
+the task, delegated, with `review.rounds.fix` as the cap and this milestone's
+`<tracker>/<milestone>/step-notes.md` — a fix is a step like any other, and
+its implementer is as fresh as the rest. A fix arriving after
+acceptance deserves a review round of its own, and dispatching it keeps the
+orchestrator out of the diff exactly as §2 of `autopilot` requires.
+
+After each fix:
 
 1. re-run the affected zone's `verify` command from `aikit.yml`;
 2. **run acceptance again, WHOLE** — not "just recheck that point". A fix
@@ -203,7 +270,9 @@ the only way to see how often the acceptance agent is wrong.
 ## Phase 4 — close out
 
 ```
-"$AIKIT/bin/verdict" gate <milestone> --write ...   # verdict into the tracker
+"$AIKIT/bin/verdict" gate <milestone> --write ...   # same flags as Phase 2,
+                                                    # --tree-ignore included
+                                # → <tracker>/<milestone>/acceptance-verdict.md
 <acceptance.stand.down>                                          # the stand is disposable
 ```
 
@@ -221,7 +290,9 @@ Deliberately seeding breakages as regular calibration is **rejected**: "said
 ok, then said not-ok once something was broken" proves only that the agent is
 not blind, while what actually harms us is leniency. Measure differently:
 **every finding the owner makes after a green acceptance is written as a line
-in `<tracker>/<milestone>/acceptance.md`** — "acceptance missed this". Three or
+in `<tracker>/<milestone>/acceptance.md`** — "acceptance missed this". That
+file is yours and nothing overwrites it; the gate writes its own verdict beside
+it, in `acceptance-verdict.md`. Three or
 four such lines in a row is the signal to fix this instruction, or to raise the
 agent's model, which is the cheapest lever available. Seeded breakage stays a
 one-off tool for a specific occasion — when the score has gone bad and it is

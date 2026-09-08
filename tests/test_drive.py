@@ -24,7 +24,7 @@ _loader.exec_module(d)
 
 
 def run(**over):
-    base = dict(milestone="e52", cdp="http://127.0.0.1:9222", started=1_000_000.0,
+    base = dict(milestone="m52", cdp="http://127.0.0.1:9222", started=1_000_000.0,
                 max_actions=3, minutes=10)
     base.update(over)
     return d.Run(**base)
@@ -72,7 +72,7 @@ class TestState(unittest.TestCase):
             original = run(actions=7, step=7)
             d.save(root, original)
             self.assertEqual(d.load(root).actions, 7)
-            self.assertEqual(d.load(root).milestone, "e52")
+            self.assertEqual(d.load(root).milestone, "m52")
 
     def test_load_without_a_run_exits_with_advice(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -147,8 +147,8 @@ class TestCli(unittest.TestCase):
     def test_begin_then_end_needs_no_browser(self):
         with tempfile.TemporaryDirectory() as tmp:
             argv = ["--evidence-root", tmp]
-            self.assertEqual(d.main(argv + ["begin", "e52", "--max-actions", "5"]), 0)
-            self.assertTrue((pathlib.Path(tmp) / "e52").is_dir())
+            self.assertEqual(d.main(argv + ["begin", "m52", "--max-actions", "5"]), 0)
+            self.assertTrue((pathlib.Path(tmp) / "m52").is_dir())
             self.assertEqual(d.main(argv + ["end"]), 0)
             self.assertFalse(d.state_path(pathlib.Path(tmp)).exists())
 

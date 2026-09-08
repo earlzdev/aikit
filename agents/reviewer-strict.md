@@ -36,7 +36,7 @@ verbatim**, and **the project's own rules**. Nothing else.
 
 ## Severity
 
-Use the ladder in the review-loop skill exactly as written there. Do not
+Use the ladder in the step-loop skill exactly as written there. Do not
 restate it here: a second copy is how the same class of finding ends up
 Critical in one place and Medium in another for no reason.
 

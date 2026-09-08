@@ -37,8 +37,17 @@ plan:
     step: "^### "
     done_when: "Готово, когда"
     acceptance: "приёмка"
-    yes: "да"
-    no: "нет"
+    # Quoted KEYS on purpose: under YAML 1.1 — which PyYAML still speaks —
+    # bare `yes:` and `no:` parse as the booleans true and false, so the two
+    # keys vanish and the marker lookup silently finds nothing.
+    "yes": "да"
+    "no": "нет"
+
+# Optional. Where the INSTALLED PLUGIN lives — the directory holding `bin/`,
+# not `bin/` itself. Set it when the plugin is somewhere the cache glob does
+# not reach, or when several versions are cached and the glob picks the wrong
+# one. `/aikit:init` prints the version it resolved so you can tell.
+# plugin_root: /Users/you/.claude/plugins/cache/aikit/aikit/0.4.0
 
 tracker: docs/tracker   # per-milestone artefacts, committed
 evidence: .acceptance   # screenshots and dumps, NOT committed (gitignore it)
@@ -64,12 +73,21 @@ review:
   # Which persona reviews. `reviewer-strict` is the one aikit ships; name a
   # project persona instead if the project has zone reviewers of its own.
   reviewer: reviewer-strict
+  # Optional. Omit either key — or the whole block — to inherit the model the
+  # run is already using. This is a QUALITY dial that happens to be a cost
+  # dial; see "Keys that carry weight". Shown commented out because absent and
+  # empty are NOT the same: `reviewer:` with nothing after it is a null, not an
+  # omission.
+  # model:
+  #   implementer: opus
+  #   reviewer: sonnet
   rounds:
     develop: 3          # cap for a normal implementation step
     fix: 2              # cap for a fix or refactor
 
 acceptance:
   rounds: 3
+  # model: sonnet       # optional, as above — omit the key to inherit
   budget:
     actions: 120
     minutes: 45
@@ -82,7 +100,7 @@ acceptance:
   #   mcp     — tools from an MCP server it already has
   #   skill   — a skill it invokes
   # The agent has EVERY tool the project has; these keys tell it which ones are
-  # the hands for this product, so it does not have to guess.
+  # the hands for this product, so it does not spend budget guessing.
   hands:
     kind: command
     use: "scripts/acceptance/drive.py"   # omit to use aikit's own bin/drive
@@ -125,10 +143,32 @@ wording of the project this pipeline grew in; a project writing its plan in
 English sets `done_when: "Done when"`,
 `acceptance: "acceptance"`, `yes: "yes"`, `no: "no"`.
 
-**`zones[].verify`** — the single most-used key. The review loop's self-gate
+**`zones[].paths`** — a **routing key, not a permission fence.** It answers
+"which `verify` and which `rulebook` apply to this change", and nothing more.
+Files belonging to no zone are normal — a `Makefile`, CI config — and a change
+touching only those runs `verify_all`. In particular an agent is not confined
+to the paths of the zone it was given: a zone whose `verify` is
+`unittest discover -s tests` is *pointing at* `tests/`, so a step that writes a
+test there is in scope even when `paths` lists only the source tree. A reviewer
+reading `paths` as a write boundary files an inflated scope violation, which is
+the most expensive false positive there is — it burns a whole round.
+
+**`zones[].verify`** — the single most-used key. The step loop's self-gate
 runs the changed zone's command; a reviewer is told to run it itself rather
 than trust a claim. A zone whose verify command is missing or wrong turns
 every review round into a reading exercise.
+
+**`review.model` / `acceptance.model`** — aikit ships **no default here on
+purpose**. Every agent inherits the model the run is already using unless you
+say otherwise, and the temptation is to set the reviewer to something cheap:
+it reads a diff against a rulebook, which sounds like undemanding work. It is
+not. The reviewer is the gate, and the whole claim of this pipeline is that
+nothing passes on the author's own word — a gate that misses things returns the
+project to exactly the state it was in before, while still costing a round.
+Move the implementer or the acceptance agent first if you are trimming spend,
+and treat lowering the reviewer as a decision to revisit the moment
+`<tracker>/<milestone>/acceptance.md` starts collecting "acceptance missed
+this" lines.
 
 **`acceptance.stand`** — must bring up a DISPOSABLE stand and must never
 point at production. The acceptance agent clicks everything, types a
@@ -153,6 +193,6 @@ and the acceptance phase is worth less.
 ## What aikit does NOT read
 
 No key points at source files, module names, or a diff. The acceptance agent
-holds every tool the project has — it could read the source — but nothing here
-tells it where to look, and the gate accepts only evidence the PRODUCT
-produced. Reading the implementation earns it nothing and costs the check.
+could read the source — a shell alone is enough — but nothing here tells it
+where to look, and the gate accepts only evidence the PRODUCT produced.
+Reading the implementation earns it nothing and costs the check.

@@ -2,7 +2,7 @@
 #
 # Leaving the `acceptance` block out is not a degraded setup — it is the right
 # configuration for a project with no interface to walk. The phase simply does
-# not exist, and `autopilot` closes milestones after review-loop and the
+# not exist, and `autopilot` closes milestones after step-loop and the
 # project's own verification.
 version: 1
 

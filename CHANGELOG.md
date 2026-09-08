@@ -2,6 +2,191 @@
 
 Newest first. What changed, and why.
 
+## 0.4.0 — 2026-09-08
+
+Autopilot stops building. Then the whole plugin was run on a throwaway project
+— every skill, both binaries, all three agents — and that run found 39 defects
+in aikit itself, most of them in instructions no test can reach.
+
+Autopilot stops building. It dispatches instead, and the cost of a long run
+stops growing with the length of the plan.
+
+- **`review-loop` is now `step-loop`, and it delegates.** It used to load into
+  the caller's context and have the caller write the code, so `autopilot` was
+  the author of every step, the holder of every diff and every verify run, and
+  the thing that closed the milestone — all in one conversation. A conversation
+  re-sends everything it holds on every turn, so the last milestone of a plan
+  paid for the whole plan. `step-loop` now spawns an **implementer** per step
+  and hands the caller back a summary and a verdict line. Same work, cost
+  bounded by a step rather than by the run: on a four-milestone, twenty-step
+  plan the modelled saving is roughly 5–6×. The `review.rounds` and
+  `review.reviewer` config keys are unchanged — the skill was renamed, the
+  config surface was not.
+- **New `agents/implementer.md`.** Builds one step, gates it on the project's
+  own `verify`, reports what it changed. It has no `Agent` tool, marks nothing
+  done, and never touches the plan or the tracker. It is **held** across that
+  step's review rounds and released at the end: the agent that wrote the code
+  is the one that fixes the findings, because it knows why it chose what it
+  chose and a fresh agent re-deriving that from a diff is both worse and more
+  expensive.
+- **The reviewer stays fresh every round, deliberately.** Holding it across
+  rounds looks like a saving and is not: its cold start — persona, `aikit.yml`,
+  the rulebook — is byte-identical on every spawn and therefore cached, while
+  its transcript is neither. Carrying it is *modelled* at about 1.5× more per
+  round, and — the part that needs no model — anchors a reviewer to re-bless
+  what it already approved. `step-loop` now says so where someone would
+  otherwise try it.
+- **`step-notes.md` per milestone.** Each step's implementer is fresh and has
+  not seen the earlier steps, so what they established goes in a file the next
+  one reads — not into a held agent. Re-readable, free between steps, and it
+  survives a stopped run.
+- **`review.model` and `acceptance.model`, both optional, both unset by
+  default.** Agents inherit the run's model unless the owner says otherwise.
+  `docs/config.md` argues against the obvious move of cheapening the reviewer:
+  it is the gate, and a gate that misses things costs a round and returns the
+  project to where it started.
+- **Verify output no longer goes into a context whole.** Every self-gate now
+  says to send it to a file and read the tail or the failures. A red suite is
+  thousands of lines and none of them are worth what they cost to hold.
+- **`autopilot` §2 is explicit that it does not build**, §3 routes acceptance
+  findings back through a fresh `step-loop` rather than fixing them by hand,
+  and §5 no longer demands a recital of every carry-over from every round —
+  those live in the tracker and the report cites them.
+- **The gate's evidence check was defeated seven times and rewritten seven
+  times.** Each fix was itself defeated by the next review round, always by the
+  same shape — a string that satisfies the evidence requirement with no capture
+  behind it:
+  1. only the `screen:` prefix was checked, so any invented filename paid;
+  2. the fix skipped an *empty* name rather than refusing it, so a bare
+     `screen:` paid — cheaper than what it had just closed;
+  3. the fix then passed the name to `evidence_dir / name`, and `pathlib`
+     discards the left operand when the right is absolute, so
+     `screen:/etc/hosts` resolved outside the evidence directory and any file
+     on the machine paid;
+  4. and underneath all three, the prefix itself was optional: the
+     `screen:`/`db:` requirements are report-wide, while an individual item was
+     satisfied by any non-empty string. One real capture paid for the entire
+     checklist, and `checked, works` — the literal string this module's
+     docstring promises is refused — went through untouched, as did `Screen:`
+     with a capital S;
+  5. and once names were checked against the evidence directory, that
+     directory was the one the gate had just read the report from — so
+     `screen:verdict.json` named a file guaranteed present in every project on
+     every run, and paid for a whole checklist from an otherwise empty
+     directory, with no filesystem access at all;
+  6. and the `screen:` requirement was report-*wide*, so `db:checked, works`
+     paid for every checklist item while the one screenshot the report needed
+     hung off a non-blocking `clumsy` finding. `agents/acceptance.md` had said
+     since 0.1.0 that a point counts as passed ONLY with a screenshot; the gate
+     had never enforced it per item;
+  7. and the evidence directory was never cleared between rounds, so a round
+     that took no actions at all could pay for itself with the previous
+     round's screenshots — which lands on rounds 2 and 3 exactly, since those
+     only happen because round 1 blocked. `acceptance-loop` now archives each
+     round's captures into `round-<N>/` before the next one starts.
+
+  Now: every evidence string on a passed item must carry a known prefix,
+  matched case-insensitively; `db:` must have something after it; a `screen:`
+  name must be one plain filename, not a path, and not the report's own; and
+  it is matched against the real files in the evidence directory — `os.scandir`
+  rather than `is_file()`, which followed symlinks, counted directories and
+  ignored case on macOS — comparing under NFC too, so a Cyrillic capture name
+  is not rejected over a normalisation difference.
+
+  Worth recording how they were found: the first by running the binary against
+  a throwaway project, the other six by reviewers attacking the previous fix
+  with constructed strings. Reading the code found none of them, and neither
+  did the test suite — it was green over every one.
+
+  **Known limits, recorded rather than fixed.** One real capture cited on
+  several checklist lines still pays for all of them: the same screenshot can
+  legitimately show two "done when" lines, so distinctness is not required,
+  and the comment in `defects()` no longer claims otherwise. And an agent with
+  a shell can always `touch` a file and quote its name — this check is hygiene
+  against a lazy run, never a boundary against an adversarial one.
+
+  **What would actually fix it**, when someone has the appetite: the check
+  asks whether a string looks like a file that exists, when the question it
+  wants is whether the driver did the work. `bin/drive` already knows — have
+  it append a manifest (`captures.json`: name, timestamp, target, digest) that
+  the reporting agent did not author, and the gate can require every cited
+  capture to appear in it and cross-check `spend.actions` against the driver's
+  own count. Seven rounds of narrowing the vocabulary of the lie is what
+  happens without that.
+- **What running the whole thing on a test project changed.** A two-milestone
+  plan on a real CLI product, carried from preconditions to two `✅`s, plus
+  `init` and `plan` run cold by agents holding only the skill text. Nothing
+  below was visible from reading:
+  - **`/aikit:init` silently configured a project against a stale release.**
+    Its `$AIKIT` recipe fell through to the cache glob, resolved an older
+    cached version, ran `verdict --help` against it, printed `ok` and exited 0
+    — while the prose two lines below worried about exactly that. The check
+    proved *a* verdict existed, never the right one. It now prints the resolved
+    **version**, and says to compare it with what you installed.
+  - **`acceptance-loop` told owners to set `bin:`**, a key renamed to
+    `plugin_root:` in 0.2.2 and read by nothing since. `plugin_root:` was also
+    undocumented in the file `init` calls "the reference"; both fixed.
+  - **`plan` forbade what it required.** "The acceptance line is written by the
+    owner. Do not decide it yourself and do not leave it out" against its own
+    "write the acceptance line". On a first plan the owner has not seen the
+    milestone yet. It now says to *propose* the line and list every proposal at
+    the gate, where the owner decides.
+  - **`plan` never pointed at `docs/plan-format.md`**, where the `M<n>`
+    numbering lives — so a cold planner had no way to learn the convention. It
+    is now in the skill itself.
+  - **`yes:` and `no:` marker keys were unquoted in every example.** YAML 1.1
+    parses those as booleans, so both keys vanish and the marker lookup finds
+    nothing.
+  - **`zones[].paths` read as a write boundary.** An implementer flagged that
+    writing a test outside its zone's paths looked like a scope violation;
+    `docs/config.md` now states that `paths` selects the rulebook and verify
+    command and is not a fence — a reviewer treating it as one files an
+    inflated High, which costs a whole round.
+  - **The acceptance persona was written for a browser in places it should not
+    have been**: a hard-coded `.png` on evidence names, five probes named as
+    browser gestures with no way to answer "no meaning here", "one read-only
+    `SELECT`" pushing a JSON-dump stand toward quoting SQL it never ran, and a
+    tripwire warning that read as though the agent's own captures voided its
+    run. All fixed against a real CLI stand.
+  - **The step hand-off carried decisions but not scaffolding.** Fixed by
+    asking for how to test what you built, for user-visible wording, and for
+    any knowing divergence from neighbouring code *with its blast radius* —
+    the last after a reviewer observed that "the rulebook wins" and "a
+    neighbour's bug is out of scope" only produce the right outcome together,
+    and nothing recorded that the result was deliberate.
+- **Milestones are numbered `M<n>` in every example and docstring**, where
+  they used to be `E<n>` (and `Э<n>` in the Russian diagram). `M` for
+  milestone reads as what it is in either language, where `E` was a leftover
+  from «этап» that meant nothing in English. Nothing parses the prefix —
+  `plan.markers.milestone` keys on the status glyph — so this changes examples
+  and nothing else; existing plans keep whatever they use.
+- **The gate no longer truncates the owner's ledger.** `--write` wrote to
+  `<tracker>/<milestone>/acceptance.md`, which `acceptance-loop` designates as
+  the owner's hand-written record of what acceptance missed. Every later round
+  replaced it wholesale. The verdict now goes to `acceptance-verdict.md` and
+  the ledger is left alone.
+- **A failed checklist item now blocks.** `blocked` consulted only findings and
+  defects, so a report could mark every "done when" line `passed: false`, file
+  nothing, and be told it may merge — the written shape of "could not", which
+  `agents/acceptance.md` says is never "good". A failed item still needs no
+  evidence, which was the deliberate rule and remains one: only a pass needs
+  proof. It just no longer passes for done.
+- **`acceptance-loop`'s Phase 3 now dispatches too.** It was the one phase still
+  telling the orchestrator to fix by hand, which contradicted the new §2 of
+  `autopilot` in the same run. Acceptance findings go into a fresh `step-loop`
+  at `review.rounds.fix` — a fix arriving after acceptance deserves a review
+  round of its own.
+- **A tool-trimming change for the acceptance agent was written, reviewed
+  three times, and withdrawn.** The agent inherits every installed tool, and on
+  a project carrying several MCP servers that is tens of thousands of tokens of
+  schema in each of a hundred turns — a real cost. The instruction to "spawn it
+  with the tools its brief names" was, however, one no orchestrator can follow:
+  `tools:` in agent frontmatter is static while `hands` and `truth` are
+  per-project, and the spawn takes no tool list. It survived two review rounds
+  as a self-consistent contradiction before the third checked whether anything
+  implemented it. `acceptance-loop` now carries a note saying why the obvious
+  fix does not work, so the next person spends their time elsewhere.
+
 ## 0.3.0 — 2026-09-08
 
 A minor rather than a patch: two config keys change meaning, and the acceptance

@@ -28,7 +28,7 @@ HOW:  the budget, the state file, target parsing and tree truncation are plain
       data and are unit-tested (`tests/test_drive.py`). Everything touching
       Playwright is confined to `_Browser` at the bottom.
 
-    drive begin e52 --max-actions 120 --minutes 45 --cdp http://127.0.0.1:9222
+    drive begin m52 --max-actions 120 --minutes 45 --cdp http://127.0.0.1:9222
     drive open http://localhost/
     drive click 'button=Save'
     drive type 'textbox=Name' 'Acme'

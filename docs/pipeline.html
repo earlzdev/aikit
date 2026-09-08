@@ -169,7 +169,7 @@ footer a:hover{text-decoration:underline}
   <div class="diagram">
     <svg viewBox="0 0 480 748" role="img" aria-labelledby="svgtitle">
       <title id="svgtitle">The pipeline: request, plan, owner gate, then each step through the
-        review loop and each milestone through the acceptance loop before it closes.</title>
+        step loop and each milestone through the acceptance loop before it closes.</title>
 
       <!-- the rail the run travels -->
       <path class="seg" id="s1" d="M144,70 L144,122"/>
@@ -218,8 +218,8 @@ footer a:hover{text-decoration:underline}
       </g>
       <g class="node" id="n-review">
         <rect class="nbox" x="110" y="452" width="220" height="48" rx="7"/>
-        <text class="nlabel" x="170" y="475">REVIEW LOOP</text>
-        <text class="nsub" x="170" y="490">no Write tool</text>
+        <text class="nlabel" x="170" y="475">STEP LOOP</text>
+        <text class="nsub" x="170" y="490">implementer · fresh reviewer</text>
       </g>
       <g class="node" id="n-accept">
         <rect class="nbox" x="110" y="572" width="220" height="48" rx="7"/>
@@ -308,10 +308,10 @@ const RUN = [
  {at:'request', seg:null,  dur:1600, phase:'Request', status:'running', ms:'—', round:'—',
   log:[['$','/aikit:plan  бронь: отмена в разговоре','cmd']]},
  {at:'plan', seg:'s1', dur:2500, phase:'Planning', status:'running',
-  log:[['plan','docs/PLAN.md · 3 milestones written'],['plan','Э57 · 2 steps · приёмка: да']]},
+  log:[['plan','docs/PLAN.md · 3 milestones written'],['plan','M57 · 2 steps · приёмка: да']]},
  {at:'gate', seg:'s2', dur:2600, phase:'Owner gate', status:'halted',
   log:[['gate','waiting for the owner','halt'],['gate','approved','ok']]},
- {at:'step', seg:'s3', dur:1900, phase:'Э57.1', status:'running', ms:'Э57', round:'—',
+ {at:'step', seg:'s3', dur:1900, phase:'M57.1', status:'running', ms:'M57', round:'—',
   log:[['step','parser accepts the card block'],['verify','uv run pytest -q → ok','ok']]},
  {at:'review', seg:'s4', dur:2200, phase:'Review', status:'blocked', round:'1 / 3',
   log:[['review','round 1 of 3 · reviewer-strict'],['review','VERDICT: 1 critical, 1 high','block']]},
@@ -319,7 +319,7 @@ const RUN = [
   log:[['fix','minimal diff, nothing else'],['verify','uv run pytest -q → ok','ok']]},
  {at:'review', seg:'s4', dur:1900, phase:'Review', status:'clean', round:'2 / 3',
   log:[['review','round 2 of 3 · a fresh instance'],['review','VERDICT: CLEAN','ok']]},
- {at:'step', seg:'L1', dur:1800, phase:'Э57.2', status:'running', round:'—',
+ {at:'step', seg:'L1', dur:1800, phase:'M57.2', status:'running', round:'—',
   log:[['step','the web form writes it back'],['verify','npm run check → ok','ok']]},
  {at:'review', seg:'s4', dur:1700, phase:'Review', status:'clean', round:'1 / 3',
   log:[['review','round 1 of 3'],['review','VERDICT: CLEAN','ok']]},
@@ -327,20 +327,20 @@ const RUN = [
   log:[['accept','stand up · disposable, seeded empty'],
        ['accept','brief = 4 items. no diff, no file names.'],
        ['accept','не работает — «Сохранить» не жмётся','block'],
-       ['gate','verdict gate Э57 → exit 1','block']]},
+       ['gate','verdict gate M57 → exit 1','block']]},
  {at:'step', seg:'L2', dur:1900, phase:'Fix', status:'running', round:'—',
-  log:[['fix','the author fixes. the agent only reports.'],['verify','npm run check → ok','ok']]},
+  log:[['fix','a fresh step-loop fixes. the agent only reports.'],['verify','npm run check → ok','ok']]},
  {at:'review', seg:'s4', dur:1400, phase:'Review', status:'clean', round:'1 / 3',
   log:[['review','VERDICT: CLEAN','ok']]},
  {at:'accept', seg:'s5', dur:2700, phase:'Acceptance', status:'clean', round:'2 / 3',
   log:[['accept','round 2 · the whole run again, fresh agent'],
-       ['gate','verdict gate Э57 → exit 0','ok'],['accept','ГОДИТСЯ','ok']]},
+       ['gate','verdict gate M57 → exit 0','ok'],['accept','ГОДИТСЯ','ok']]},
  {at:'close', seg:'s6', dur:2600, phase:'Close', status:'clean', round:'—',
   log:[['close','verify_all → ok','ok'],
-       ['close','✅ Э57 into the plan · the same commit as the work'],
+       ['close','✅ M57 into the plan · the same commit as the work'],
        ['close','PR opened','ok']]},
- {at:'step', seg:'L3', dur:2000, phase:'Э58', status:'running', ms:'Э58', round:'—',
-  log:[['next','Э58 · приёмка: нет · no acceptance phase here']]},
+ {at:'step', seg:'L3', dur:2000, phase:'M58', status:'running', ms:'M58', round:'—',
+  log:[['next','M58 · приёмка: нет · no acceptance phase here']]},
 ];
 
 const $ = id => document.getElementById(id);
@@ -362,7 +362,7 @@ function paint(s){
   $('pill').className = 'pill ' + s.status;
   if (s.ms) $('ms').textContent = s.ms;
   if (s.round) $('round').textContent = s.round;
-  if (s.ms === 'Э58') acc = 'приёмка: нет';
+  if (s.ms === 'M58') acc = 'приёмка: нет';
   if (s.at === 'request') acc = 'приёмка: да';
   $('acc').textContent = acc;
 

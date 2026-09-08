@@ -4,7 +4,14 @@ The full specification is the `plan` skill (`skills/plan/SKILL.md`). This is
 one screen of what it produces, so a reader can see the shape before reading
 the rules.
 
-Milestones are `##`, steps are `###`. Steps go through review-loop; the whole
+Milestones are numbered `M<n>` — **M for milestone** — and their steps carry
+the milestone's number with a suffix: `M57.1`, `M57.2`. The prefix is a
+convention, not something aikit parses (`plan.markers.milestone` matches the
+status glyph, not the number), but keeping it makes a milestone identifiable
+in a commit message, a tracker directory name and a `verdict gate` argument
+without any surrounding context.
+
+Milestones are `##`, steps are `###`. Steps go through step-loop; the whole
 milestone goes through acceptance-loop. State lives in the heading: `→`
 planned, `✅` done with a date.
 
@@ -17,16 +24,16 @@ planned, `✅` done with a date.
 
 ---
 
-## ✅ E56 — Acceptance by agent: a phase of its own after review · done 2026-09-07
+## ✅ M56 — Acceptance by agent: a phase of its own after review · done 2026-09-07
 
 The review loop answers "is the code right?". Nothing answered "can a person
 use this?" — which is why every finding that mattered in the first week of
 September arrived through the owner's own eyes while the suite was green. What
 was missing was not tests. It was a layer of judgement.
 
-### E56.1 — The disposable stand and the read-only role
-### E56.2 — The driver: accessibility tree, screenshots, budgets
-### E56.3 — The gate: an incomplete report blocks like a breakage
+### M56.1 — The disposable stand and the read-only role
+### M56.2 — The driver: accessibility tree, screenshots, budgets
+### M56.3 — The gate: an incomplete report blocks like a breakage
 
 **E2E:** `test_acceptance_gate.py`, existing suite stays green.
 
@@ -37,13 +44,13 @@ acceptance: no
 
 ---
 
-## → E57 — A new client's file carries its card data · planned 2026-09-07
+## → M57 — A new client's file carries its card data · planned 2026-09-07
 
 Today the card is filled in by hand after the file is uploaded, and the two
 drift apart within a day. The file becomes the source of truth for both.
 
-### E57.1 — The parser accepts the card block
-### E57.2 — The web form writes it back on save
+### M57.1 — The parser accepts the card block
+### M57.2 — The web form writes it back on save
 
 **E2E:** `test_client_file_card_e2e.py`
 

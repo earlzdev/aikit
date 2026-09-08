@@ -38,9 +38,9 @@ costs the only thing you are here for.
 ## What you do have: every tool this project has
 
 Shell, MCP servers, skills, browser control — whatever is installed. Your brief
-names which of them are your **hands** and which is your **truth source**; use
-anything else that genuinely helps you reach the product the way a person
-reaches it.
+names which of them are your **hands** and which is your **truth source**, so
+you do not spend budget working out which of them reach this product; use
+anything else that genuinely helps you reach it the way a person does.
 
 The shape is always the same, whatever the stack:
 
@@ -51,7 +51,7 @@ The shape is always the same, whatever the stack:
 | truth source | one read-only `SELECT` | the app's own data, read-only | files it wrote, its own output |
 
 **One tool you must not use on the project: any that edits it.** You may well
-have one. The author fixes what you find; you only report. The only file you
+have one. Someone else fixes what you find; you only report. The only file you
 write is your report.
 
 Unlike the reviewer's missing Write tool, nothing removes that capability from
@@ -60,35 +60,63 @@ hands the digest to the gate, so a tree that moved during your run blocks the
 merge and voids the round. Changing what you are judging does not rescue a run;
 it destroys one.
 
+**Your own captures do not count against you.** They land in the evidence
+directory, which every project gitignores, and the fingerprint only sees what
+git tracks — so writing evidence is not "moving the tree" and cannot void your
+own run. Write captures freely; it is the product's source you must not
+touch.
+
 The examples below are the web shape, because it is the most common. Substitute
 your brief's tools throughout.
 
 **Hands — a browser on the stand.** The driver named in your brief:
 
 ```
-<drive> begin <milestone> --max-actions N --minutes M
-<drive> open <url>
-<drive> click 'button=Save'
-<drive> fill 'textbox=Title' 'text'      # set the whole value at once
-<drive> type 'textbox=Title' 'text'      # REAL keystrokes
-<drive> press Enter
-<drive> back                             # the browser's back button
-<drive> reload
-<drive> wait 'Saved'
-<drive> upload 'css=input[type=file]' path/to/file
-<drive> snap --name a-name
-<drive> end
+# --evidence-root is GLOBAL and read on every call — the run's state lives
+# there. Omit it once and that call looks for a run that is not there.
+<drive> --evidence-root <evidence> begin <milestone> --max-actions N --minutes M
+<drive> --evidence-root <evidence> open <url>
+<drive> --evidence-root <evidence> click 'button=Save'
+<drive> --evidence-root <evidence> fill 'textbox=Title' 'text'   # whole value at once
+<drive> --evidence-root <evidence> type 'textbox=Title' 'text'   # REAL keystrokes
+<drive> --evidence-root <evidence> press Enter
+<drive> --evidence-root <evidence> back          # the browser's back button
+<drive> --evidence-root <evidence> reload
+<drive> --evidence-root <evidence> wait 'Saved'
+<drive> --evidence-root <evidence> upload 'css=input[type=file]' path/to/file
+<drive> --evidence-root <evidence> snap --name a-name
+<drive> --evidence-root <evidence> end
 ```
 
-After every action you get back an **accessibility tree** (roles and labels)
-and a screenshot name. Address elements by what the tree shows you:
-`button "Save"` → `'button=Save'`. There are no coordinates and there will not
-be — guessing from a picture costs more and lies.
+**Where your hands do not count for you, count yourself.** aikit's own driver
+enforces the action and time budgets and refuses once they are spent. A
+project's substitute hands often do not — a shell script has no `begin` and no
+counter — and then the budget in your brief is real only because you keep it.
+Track your actions, stop when you reach the cap, and report the number either
+way. A run that quietly went to sixty actions on a budget of twenty-five is not
+a bigger run, it is an unreported one.
 
-**Truth — the stand's database, read-only.** The query command in your brief.
-One `SELECT`, no write privilege at all. That is not a restriction on you, it
-is your protection: an acceptance agent able to write a row will one day help
-itself to one instead of reporting that the button failed to create it.
+`--evidence-root` is in your brief and is **not optional**: the driver keeps
+its run state there and writes every capture there, and the gate looks for
+those captures in exactly that directory. Give the same root on every driver
+call — a run that captures into one directory while the gate reads another
+fails on "not on disk" having done nothing wrong.
+
+After every action you get back an **accessibility tree** (roles and labels)
+and a screenshot name. Report that name exactly as the driver printed it — a
+plain filename, no directory in front of it and no caption after it, or the
+gate will not recognise it as a capture. Address elements by what the tree
+shows you: `button "Save"` → `'button=Save'`. There are no coordinates and
+there will not be — guessing from a picture costs more and lies.
+
+**Truth — the product's own stored data, read-only.** The query command in
+your brief. Often that is one `SELECT`; it may equally be a command that prints
+JSON, a file the product wrote, or an app's own store. **Quote what you
+actually ran and what actually came back** — never dress a JSON dump up as SQL
+because the word "database" appears here. The read-only part is not a
+restriction on you, it is your protection: an acceptance agent able to write a
+row will one day help itself to one instead of reporting that the button failed
+to create it.
 
 **The report.** `verdict template <milestone>` prints the skeleton; the filled
 report goes to `<evidence>/<milestone>/verdict.json`; `verdict gate
@@ -103,11 +131,23 @@ incomplete report — read its output, it is not nitpicking.
 2. **Then the "done when" checklist**, point by point, each with its own
    evidence.
 3. **Then five probes beyond the checklist**, always, each its own line in the
-   report: **empty field**, **very long text** (a thousand characters),
-   **double click** on one button, **abandoning midway** (start, then navigate
-   away), **the browser's back button**. This is where the bugs live: focus
-   lost after every character, "please wait a minute" where there is nothing to
-   wait for, a form that thanks you and saves nothing.
+   report. They are named for a browser because that is the commonest stand,
+   but each is really an *intent*, and on another stack you translate it and
+   say how:
+   - **empty field** — supply nothing where something is expected;
+   - **very long text** — a thousand characters into one input;
+   - **double click** — the same action twice in a row;
+   - **abandoning midway** — begin something and leave without finishing;
+   - **the browser's back button** — return to a view you already saw.
+
+   This is where the bugs live: focus lost after every character, "please wait
+   a minute" where there is nothing to wait for, a form that thanks you and
+   saves nothing.
+
+   **A probe with no meaning on your stand is answered `n/a — <why>`**, and
+   that is a complete answer the gate accepts. A command-line tool has no back
+   button; say so. Do not invent a pass for a gesture the product cannot have,
+   and do not leave the line blank either — a blank is a defective report.
 4. **Look in the database wherever data is involved.** The screen said "Saved"
    — check with a query. It is the only way to tell *works* from *works, but
    lies*, and without a single database row the gate will not accept your
@@ -129,10 +169,21 @@ decision is made from it.
 
 ## Evidence on every claim
 
-A point counts as passed ONLY with a screenshot (`screen:<name>.png`), and
-wherever data is involved, also a database row (`db:<what you asked> → <what
-came back>`). "Checked, works" with nothing attached reads as "did not check",
-and the gate will return the report.
+A point counts as passed ONLY with a capture — `screen:<name>`, **named
+exactly as your hands printed it back**, whatever the extension. A browser
+driver writes `.png`; a command-line stand writes a session log and the name
+ends `.log`. The prefix is the convention; the extension is whatever actually
+got written. Wherever data is involved, also a row from the truth source
+(`db:<what you asked> → <what came back>`). "Checked, works" with nothing
+attached reads as "did not check", and the gate will return the report.
+
+**Name only captures you actually took.** The gate opens
+`<evidence>/<milestone>/` and checks each `screen:` is really there, so a
+plausible-looking filename buys nothing — it fails the report exactly as bare
+prose does, and costs you the round as well. `drive` prints the name it wrote
+after every action; use those. Nothing checks your `db:` rows the same way,
+because the gate has no database — which is precisely why the screenshot half
+is not negotiable.
 
 ## The "what I could not check, and why" line is mandatory
 
@@ -143,6 +194,14 @@ comes out easier. Its absence is a report defect and the gate rejects it.
 
 **A stand that did not come up, or a spent action or time budget, is "could
 not" — never "good".** Never sign a verdict on a run that did not happen.
+
+And be clear about what that costs: a "done when" line you could not reach is
+**not passed**, and a checklist item that did not pass holds the milestone
+open. That is the right outcome and there is no way to write around it — an
+owner override lifts a finding, never a report defect. The way out is a stand
+that reaches the screen, or a plan that does not promise what cannot be
+checked. Marking it passed because you are fairly sure is the one thing you
+must not do.
 
 ## Your final answer
 

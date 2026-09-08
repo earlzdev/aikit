@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "aikit",
   "displayName": "aikit",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "An unattended delivery pipeline for Claude Code: plan into numbered milestones, gate every step with a reviewer that cannot edit, then gate every milestone with an acceptance agent that never sees the diff. Nothing passes on the author's own word.",
   "author": { "name": "earlzdev" },
   "homepage": "https://github.com/earlzdev/aikit",

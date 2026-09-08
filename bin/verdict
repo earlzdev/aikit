@@ -29,9 +29,9 @@ HOW:  no third-party imports and no config file on purpose — the skill reads
       `aikit.yml` and passes what it found as flags. A binary that parsed YAML
       would need a dependency and would couple the gate to the config's shape.
 
-    verdict template e52 > .acceptance/e52/verdict.json
-    verdict gate e52
-    verdict gate e52 --write --lang ru
+    verdict template m52 > .acceptance/m52/verdict.json
+    verdict gate m52
+    verdict gate m52 --write --lang ru
 """
 
 from __future__ import annotations
@@ -40,10 +40,12 @@ import argparse
 import fnmatch
 import hashlib
 import json
+import os
 import pathlib
 import re
 import subprocess
 import sys
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -76,6 +78,13 @@ PROBES = (
 # so that "checked, works" cannot be typed into an evidence field as-is.
 SCREEN = "screen:"
 DB = "db:"
+
+# The gate reads the report from the very directory it then searches for
+# captures, so this name is guaranteed present on every run in every project
+# with no write by anyone. `screen:verdict.json` therefore paid for a whole
+# checklist from an otherwise empty directory — the fifth defeat of the
+# evidence check, and the only one that needed no filesystem access at all.
+REPORT_NAME = "verdict.json"
 
 LABELS: dict[str, dict[str, str]] = {
     "en": {
@@ -167,9 +176,9 @@ def tree_state(cwd: pathlib.Path | None = None,
                ignore: tuple[str, ...] = ()) -> tuple[str, tuple[str, ...]]:
     """Fingerprint the repository's working state, and name what is dirty.
 
-    The acceptance agent holds every tool this project has, editing tools
-    included, and "you never fix anything, you only report" is an instruction
-    it could talk itself out of on a long run. So the orchestrator records this
+    The acceptance agent can edit this project — a shell alone is enough for
+    that — and "you never fix anything, you only report" is an instruction it
+    could talk itself out of on a long run. So the orchestrator records this
     before spawning it and passes it back with `--expect-tree`: if the tree
     moved while the run was happening, the gate blocks. Detection rather than
     prevention, but it lands on the one exit code that already stops a merge,
@@ -291,8 +300,18 @@ def parse(data: Any) -> Report:
         item = str(raw.get("item", "")).strip()
         if not item:
             raise BadReport(f"checklist[{i}]: no `item` text")
-        checklist.append(Item(item=item,
-                              passed=bool(raw.get("passed")),
+        # NOT bool(): every non-empty string is truthy, so `"passed": "false"`
+        # — and `"нет"`, and `"not checked"` — read as PASSED, which is also
+        # the escape hatch from the failed-item defect below. This format is
+        # written by a model, in English or Russian, and models do emit
+        # stringified booleans.
+        passed = raw.get("passed")
+        if not isinstance(passed, bool):
+            raise BadReport(
+                f"checklist[{i}]: `passed` must be true or false, not "
+                f"{passed!r} — a string here reads as passed whatever it says"
+            )
+        checklist.append(Item(item=item, passed=passed,
                               evidence=_strs(raw.get("evidence"), f"checklist[{i}].evidence")))
 
     findings = []
@@ -312,8 +331,18 @@ def parse(data: Any) -> Report:
                                 where=str(raw.get("where", "")).strip(),
                                 evidence=_strs(raw.get("evidence"), f"findings[{i}].evidence")))
 
+    # Type-check BEFORE the `or {}` default: `[] or {}` is `{}`, so an empty
+    # list of the wrong shape used to pass as "absent" and a non-empty one
+    # crashed with an AttributeError the agent sees as a traceback.
+    raw_probes = data.get("beyond_checklist")
+    if raw_probes is not None and not isinstance(raw_probes, dict):
+        raise BadReport("`beyond_checklist` must be an object of probe → answer")
+    raw_probes = raw_probes or {}
+    raw_spend = data.get("spend")
+    if raw_spend is not None and not isinstance(raw_spend, dict):
+        raise BadReport("`spend` must be an object with `actions` and `minutes`")
     probes: dict[str, str] = {}
-    for key, value in (data.get("beyond_checklist") or {}).items():
+    for key, value in raw_probes.items():
         canonical = PROBE_ALIASES.get(str(key).strip().lower())
         if canonical:
             probes[canonical] = str(value).strip()
@@ -358,7 +387,8 @@ def read_overrides(path: pathlib.Path) -> tuple[str, ...]:
 # -- the gate itself ----------------------------------------------------------
 
 def defects(report: Report, *, require_db: bool = True,
-            tree: tuple[str, str, tuple[str, ...]] | None = None) -> tuple[str, ...]:
+            tree: tuple[str, str, tuple[str, ...]] | None = None,
+            evidence_dir: pathlib.Path | None = None) -> tuple[str, ...]:
     """Everything that makes the report itself unusable, regardless of findings.
 
     A report with holes cannot support a "good" verdict, so these block just
@@ -377,7 +407,7 @@ def defects(report: Report, *, require_db: bool = True,
             named = ", ".join(moved[:5]) + ("…" if len(moved) > 5 else "")
             out.append(
                 f"the working tree changed during the acceptance run: "
-                f"{named or '(paths unknown)'}. The author fixes what acceptance "
+                f"{named or '(paths unknown)'}. Someone else fixes what acceptance "
                 f"finds; a run that edited the code it was judging is void, not "
                 f"passed. If these are generated files, pass --tree-ignore"
             )
@@ -396,29 +426,202 @@ def defects(report: Report, *, require_db: bool = True,
         if item.passed and not item.evidence:
             out.append(f'checklist item marked passed with no evidence: "{item.item}"')
 
+    # A "done when" line that did not pass means the milestone is not done.
+    # The gate used to consult only findings and defects, so a report could
+    # fail half the checklist, file nothing, and still be told it may merge —
+    # the written shape of "could not", which is never "good".
+    failed = [item.item for item in report.checklist if not item.passed]
+    if failed:
+        out.append(
+            "checklist items that did not pass: "
+            + "; ".join(f'"{f}"' for f in failed[:5])
+            + ("…" if len(failed) > 5 else "")
+            + '. The milestone\'s "done when" is not met'
+        )
+
     everything = [e for item in report.checklist for e in item.evidence]
     everything += [e for f in report.findings for e in f.evidence]
-    if not any(e.startswith(SCREEN) for e in everything):
+
+    # EVERY piece of evidence must carry a known prefix, and the match is
+    # case-insensitive. This is the fourth defeat of this check and the one
+    # that made the other three cheap: the report-wide `any()` below asks
+    # whether SOME evidence is a screenshot, while an individual item was
+    # satisfied by any non-empty string at all. So one real capture anywhere
+    # paid for the whole checklist, and "checked, works" — the exact string
+    # this module's docstring promises is refused — went through untouched.
+    # `Screen:` with a capital S did too, for want of a `.lower()`.
+    # Every evidence string ANYWHERE must carry a prefix — findings included,
+    # which they were not before: a finding was exempt from this rule but not
+    # from the capture-name rule below. Note the prefix rule alone does not
+    # settle it, since "Screen: the field loses focus…" does start with the
+    # prefix; the whitespace rule in `_malformed` is what tells prose from a
+    # filename.
+    unprefixed = sorted({e for item in report.checklist if item.passed
+                         for e in item.evidence
+                         if not e.lower().startswith((SCREEN, DB))}
+                        | {e for f in report.findings for e in f.evidence
+                           if not e.lower().startswith((SCREEN, DB))})
+    if unprefixed:
+        shown = ", ".join(repr(e) for e in unprefixed[:5])
+        out.append(
+            f"evidence that is neither `{SCREEN}` nor `{DB}`: "
+            f"{shown}" + ("…" if len(unprefixed) > 5 else "")
+            + ". Prose is not evidence — a claim is paid for with a capture or "
+            "a row, and each item pays for itself"
+        )
+
+    def _is(prefix: str, e: str) -> bool:
+        return e.lower().startswith(prefix)
+
+    def _capture_name(e: str) -> str:
+        return e[len(SCREEN):].strip() if _is(SCREEN, e) else ""
+
+    def _malformed(n: str) -> bool:
+        """A capture name is ONE plain filename. Every previous version of this
+        check was defeated by a string it had not imagined — an empty name, a
+        path out of the directory, the report's own name.
+
+        Whitespace is refused for the opposite reason: `shot_name()` cannot
+        produce it, and without the rule a finding whose prose begins
+        "Screen: the field loses focus…" parses as a filename and blocks the
+        merge with "not on disk" — a blameless block with a baffling message.
+        Prose gets told it is prose.
+
+        A leading dot goes the same way: `screen:.DS_Store` paid, and
+        `.DS_Store` appears the moment somebody opens the evidence folder in
+        Finder to look at the screenshots."""
+        return (not n or "/" in n or "\\" in n or n in (".", "..")
+                or n == REPORT_NAME or any(c.isspace() for c in n)
+                or n.startswith(".")
+                or pathlib.PurePosixPath(n).is_absolute())
+
+    # `db:` on its own is defeat #2 one prefix over: it satisfies both the
+    # per-item rule and `require_db` while saying nothing about any query.
+    # The row cannot be verified — the gate has no database — but it can at
+    # least be required to exist.
+    if any(_is(DB, e) and not e[len(DB):].strip() for e in everything):
+        out.append(
+            f"`{DB}` with nothing after it — a row that is not quoted is not "
+            "a row, and the gate has no database to look it up in"
+        )
+
+    if not any(_is(SCREEN, e) for e in everything):
         out.append(f"not one `{SCREEN}` piece of evidence in the whole report")
-    if require_db and not any(e.startswith(DB) for e in everything):
+
+    # Each passed item must cite a capture of its own — meaning ITS OWN LINE
+    # must name one, not that the capture is unique to it. The same screenshot
+    # may legitimately show two "done when" lines, so distinctness is NOT
+    # required, and the cost of that is honest: one real capture, cited N
+    # times, still pays for N items. That is a known and recorded limit, much
+    # weaker than what it replaced — `db:` alone used to pay for a whole
+    # checklist while the single report-wide `screen:` requirement was
+    # satisfied by a screenshot hanging off a non-blocking `clumsy` finding.
+    # A `db:` row stays an ADDITIONAL claim, never a sufficient one, because
+    # the gate has no database to check it against.
+    uncaptured = [item.item for item in report.checklist
+                  if item.passed
+                  and not any(_is(SCREEN, e) and not _malformed(_capture_name(e))
+                              for e in item.evidence)]
+    if uncaptured:
+        out.append(
+            "passed with no capture of its own: "
+            + "; ".join(f'"{i}"' for i in uncaptured[:5])
+            + ("…" if len(uncaptured) > 5 else "")
+            + f". A `{DB}` row is an extra claim, not a substitute — the gate "
+            "has no database, which is exactly why the screenshot is required"
+        )
+    if require_db and not any(_is(DB, e) for e in everything):
         out.append(
             f"not one `{DB}` row in the whole report — a run that never looked at "
             "the data cannot tell working from working-but-lying"
         )
+
+    # WHAT THIS CHECK IS, AND IS NOT. It is hygiene against a lazy or sloppy
+    # run, not a boundary against an adversarial one. An acceptance agent holds
+    # a shell; it can always `touch 007-saved.png` and quote the name. Nothing
+    # here can stop that, and the tripwire does not reach the evidence
+    # directory because that directory is deliberately gitignored.
+    #
+    # What it CAN do is make every *cheap* way of not looking cost more than
+    # looking: a filename nobody captured, an empty name, a path out of the
+    # directory, an unprefixed sentence, the report naming itself. Each of
+    # those was a real defeat, found by a reviewer rather than by reading, and
+    # each is now refused. If you are adding a sixth rule here, that is the
+    # bar to hold it to — "does this close a way of writing a report without
+    # doing the work" — and not "is this unforgeable", which it cannot be.
+    #
+    # Seven defeats so far, six of them the same mistake in a new spelling —
+    # the argument for the shared helpers above. The seventh was not in this
+    # function at all: the evidence directory was never cleared between rounds,
+    # and it is `acceptance-loop`'s Phase 1 that archives it now.
+    #
+    # THE REAL FIX, when someone has the appetite: this check asks whether a
+    # string looks like a file that exists, when the question it wants to ask
+    # is whether the driver did the work. `bin/drive` already knows — it wrote
+    # every capture and charged every action. A manifest it appends
+    # (`captures.json`: name, timestamp, target, digest of the bytes) would be
+    # a file the REPORTING agent did not author, and the gate could then
+    # require every cited capture to appear in it and cross-check
+    # `spend.actions` against the driver's own count. Still forgeable — the
+    # agent holds a shell — but forgery moves from "type a name twice" to
+    # "write a consistent fake manifest", which is the cost curve this is
+    # reaching for. Narrowing the vocabulary of the lie, one rule at a time,
+    # is what produced seven rounds of this.
+    #
+    # `db:` rows cannot be checked against anything and deliberately are not:
+    # they are the agent's prose about what a query returned, and the gate has
+    # no database. That asymmetry is the reason a screenshot is cheap to demand
+    # — and the reason the screenshot half is checked as hard as it is below.
+    if evidence_dir is not None:
+        named = [_capture_name(e) for e in everything if _is(SCREEN, e)]
+        malformed = sorted({n for n in named if _malformed(n)})
+        if malformed:
+            shown = ", ".join(repr(n) for n in malformed[:5])
+            out.append(
+                f"`{SCREEN}` evidence that is not a plain capture filename: {shown}"
+                + ("…" if len(malformed) > 5 else "")
+                + f". It must be one file in {evidence_dir}, named exactly as "
+                "the driver wrote it — not a path, not empty, and with no "
+                "spaces in it. A sentence here is prose, not a capture"
+            )
+        # Real files only: `os.listdir` counted a directory named like a
+        # capture, and following a symlink would make "named exactly as the
+        # driver wrote it" untrue. Compared under NFC as well as byte-for-byte
+        # so a Cyrillic or accented capture name — which `shot_name` passes
+        # through unchanged, and `language: ru` makes ordinary — is not
+        # rejected over a normalisation the two sides spell differently.
+        try:
+            with os.scandir(evidence_dir) as it:
+                present = {e.name for e in it if e.is_file(follow_symlinks=False)}
+        except OSError:
+            present = set()
+        folded = {unicodedata.normalize("NFC", n) for n in present}
+        absent = sorted({n for n in named
+                         if n and n not in malformed and n not in present
+                         and unicodedata.normalize("NFC", n) not in folded})
+        if absent:
+            out.append(
+                "evidence names screenshots that are not in "
+                f"{evidence_dir}: {', '.join(absent[:5])}"
+                + ("…" if len(absent) > 5 else "")
+                + ". A capture that is not on disk did not happen"
+            )
 
     return tuple(out)
 
 
 def gate(report: Report, *, overrides: tuple[str, ...] = (),
          require_db: bool = True,
-         tree: tuple[str, str, tuple[str, ...]] | None = None) -> Decision:
+         tree: tuple[str, str, tuple[str, ...]] | None = None,
+         evidence_dir: pathlib.Path | None = None) -> Decision:
     lifted, blockers = [], []
     for finding in report.findings:
         if finding.klass not in BLOCKING:
             continue
         (lifted if finding.what in overrides else blockers).append(finding)
 
-    found = defects(report, require_db=require_db, tree=tree)
+    found = defects(report, require_db=require_db, tree=tree,
+                    evidence_dir=evidence_dir)
     return Decision(
         blocked=bool(blockers or found),
         blockers=tuple(blockers),
@@ -493,9 +696,11 @@ TEMPLATE: dict[str, Any] = {
         }
     ],
     # Empty, filled by the run. The example alongside shows the shape; the
-    # skeleton passes the gate as-is on purpose — a contract handed to an agent
-    # must be self-consistent, or the first run fights the parser instead of
-    # the feature.
+    # skeleton passes the gate as soon as its placeholder capture exists on
+    # disk, on purpose — a contract handed to an agent must be self-consistent,
+    # or the first run fights the parser instead of the feature. It does NOT
+    # pass with no capture at all, and must not: that is the whole point of the
+    # evidence check in `defects()`.
     "findings": [],
     "_example_finding": {
         "class": BROKEN,
@@ -513,7 +718,7 @@ TEMPLATE: dict[str, Any] = {
 
 
 def verdict_path(milestone: str, root: pathlib.Path) -> pathlib.Path:
-    return root / milestone / "verdict.json"
+    return root / milestone / REPORT_NAME
 
 
 def override_path(milestone: str, tracker: pathlib.Path) -> pathlib.Path:
@@ -547,11 +752,16 @@ def run_gate(milestone: str, *, write: bool, tracker: pathlib.Path,
 
     decision = gate(report,
                     overrides=read_overrides(override_path(milestone, tracker)),
-                    require_db=require_db, tree=tree)
+                    require_db=require_db, tree=tree,
+                    evidence_dir=path.parent)
     text = render(report, decision, lang)
     print(text)
     if write:
-        out = tracker / milestone / "acceptance.md"
+        # NOT `acceptance.md`: that file is the OWNER's ledger of what
+        # acceptance missed after a green verdict, written by hand over the
+        # life of a milestone. `--write` truncates whatever it is pointed at,
+        # and every later round pointed it at the owner's own notes.
+        out = tracker / milestone / "acceptance-verdict.md"
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(text, encoding="utf-8")
         print(f"[verdict] written to {out}", file=sys.stderr)

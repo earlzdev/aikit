@@ -25,23 +25,33 @@ Two levels, and the distinction is load-bearing:
   "done when" block. It is the unit that goes through acceptance and the unit
   that merges.
 - **Step** (`###`) — a piece of a milestone that one pass of work can finish.
-  It is the unit that goes through review-loop.
+  It is the unit that goes through step-loop.
+
+Milestones are numbered **`M<n>`** — M for milestone — and a step carries its
+milestone's number with a suffix: `M57.1`, `M57.2`. On a project with no plan
+yet, start at `M1`. Nothing parses the prefix, so a project that already
+numbers differently keeps its own scheme; §"Producing a plan" step 1 says the
+existing file wins. `docs/plan-format.md` in this plugin is the same format
+written out at length, with a worked example — read it if anything below is
+ambiguous.
 
 ```markdown
-## → E57 — A new client's file carries its card data · planned 2026-09-07
+## → M57 — A new client's file carries its card data · planned 2026-09-07
 
 <What changes, in prose, with the reasoning. "Why" matters more than "what"
 here: it is what the acceptance agent uses to tell a deliberate omission from
 an unfinished one. Without it, a capability left out on purpose gets filed as
 a bug.>
 
-### E57.1 — The parser accepts the card block
-### E57.2 — The web form writes it back
+### M57.1 — The parser accepts the card block
+### M57.2 — The web form writes it back
 
 **E2E:** <the tests that must be green, by name, or "none">
 
-**Done when** <the criterion, in prose a person can check — not "the code is
-written", but what becomes true for whoever uses it>
+**Done when** <the criteria a person can check — not "the code is written",
+but what becomes true for whoever uses it. One line each, as many as the
+milestone needs; this block is the acceptance agent's whole specification, and
+it walks it point by point.>
 
 acceptance: yes
 <The owner's scenario, in words: how a person actually uses this. Required
@@ -50,14 +60,19 @@ whenever acceptance is yes.>
 
 Use the words from `plan.markers` rather than the English above — a project
 whose plan is Russian writes `**Готово, когда**` and `приёмка: да`, and the
-markers config is what tells every skill where to look.
+markers config is what tells every skill where to look. `**E2E:**` is the one
+exception: it has no marker because nothing looks for it mechanically, so keep
+it in that literal form whatever language the plan is in.
 
-**Mark state in the heading — `→` planned, `✅` done with the date — and that
-glyph is not decoration.** It is what `plan.markers.milestone` keys on, so it
+**Mark state in the heading — `→` planned, `✅` done, each with its date — and
+that glyph is not decoration.** It is what `plan.markers.milestone` keys on, so it
 is what separates a milestone from a step and from an ordinary `##` section
 like "General rules". A heading-level match alone (`^##+`) catches all three
 and silently turns every step into a milestone, which costs exactly the
-distinction §1 calls load-bearing. Finished
+distinction §1 calls load-bearing. `→` and `✅` are what the shipped default
+matches; a project that configures `plan.markers.milestone` differently uses
+whatever its own regex keys on, and this skill follows the config rather than
+the two glyphs named here. Finished
 milestones stay in the file. The plan is the project's history as much as its
 future, and a milestone deleted after landing takes its reasoning with it.
 
@@ -86,16 +101,24 @@ the cheapest gate in the system and the one that prevents a fleet spending a
 night building the wrong product. Present the milestones, wait, and do not
 start on "obviously fine" ones in the meantime.
 
-**The acceptance line.** Every milestone gets an explicit yes or no, written by
-the owner. Do not decide it yourself and do not leave it out:
+**The acceptance line.** Every milestone carries an explicit yes or no, and
+the answer is the owner's:
 
 - **yes** — there is an interface a person walks through. Requires a scenario
   in words, right there in the milestone.
 - **no** — nothing to click (a migration, a refactor, an internal contract).
   A deliberate answer, not a forgotten line.
 
-When a milestone has no such line, say so and ask. A missing line is not a
-default of "no".
+**On a plan you are writing, propose it.** The owner has not seen the milestone
+yet — that is what the gate in §4 is for — so there is no answer of theirs to
+transcribe. Write the line you think is right, write the scenario if you wrote
+`yes`, and list every acceptance line you proposed when you present the plan,
+so the gate is where they are actually decided. Proposing is not deciding; the
+plan is not approved until the owner says so.
+
+**On a plan that already exists, do not touch it.** A milestone whose line is
+missing gets a question, not a default: say it is missing and ask. A missing
+line is never a default of "no".
 
 ## 4. Keeping the plan honest
 
@@ -131,4 +154,11 @@ default of "no".
    line are the owner's; structure is yours.
 3. Write the milestones. For each: the prose with reasoning, the steps, the
    "done when", the acceptance line, and a scenario when acceptance is yes.
-4. Present them for approval. Do not start building.
+4. Present them for approval — including every acceptance line you proposed.
+   Do not start building.
+
+Two things people ask that the shape above does not answer. **Numbering** on a
+fresh plan starts at `M1`. **The plan commit** goes on the branch you are
+already on: a plan is not a task and does not take `git.branch_prefix`, and
+putting it on a branch of its own hides `plan.path` from anything reading the
+working tree on `main` — autopilot included.
