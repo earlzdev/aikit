@@ -134,7 +134,7 @@ stack that is not a browser at all. The agent holds every tool the project has;
 `0.1.0`. The gate, the budgets and the report parsing are unit-tested (55
 tests, stdlib only). `bin/drive`'s Playwright layer has **not** been exercised
 against a live browser — the logic around it is tested, the browser calls are
-not. Projects with an existing driver should keep it (`acceptance.drive`) until
+not. Projects with an existing driver should keep it (`acceptance.hands`) until
 that changes.
 
 ## Licence
