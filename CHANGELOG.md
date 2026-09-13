@@ -2,6 +2,39 @@
 
 Newest first. What changed, and why.
 
+## 0.4.1 — 2026-09-13
+
+Each step now closes the agents it opened.
+
+- **`step-loop` Phase 4 stops every agent the step spawned.** Reported from a
+  real run: implementers and reviewers from earlier steps sat in the session
+  beside the live one, and nothing said to close them — "let the implementer
+  go" only ever meant "stop sending to it". The loop now keeps the step's agent
+  ids, calls `TaskStop` on all of them in one message before it reports, and
+  says how many were actually still running. Mechanically, on purpose: a
+  finished agent answers `is not running`, which costs nothing, while
+  remembering which completion notices arrived is what a long context loses. A
+  finished agent is harmless; a running one from a closed step is not — an
+  implementer can still commit into the range the next step's reviewer reads
+  as that step's diff.
+- **`acceptance-loop` does the same between rounds and at close-out**, where
+  it matters more: a previous round's agent still running can write a capture
+  after the archive has moved the old ones away, where the next gate takes it,
+  and every file it writes trips the next round's tripwire.
+- **`autopilot` §4 stops anything still running before it writes the report**
+  of a stopped run. A tree an implementer is still committing to is not a
+  state the owner can look at.
+- **What none of it claims: removing finished agents from the list.** Checked
+  before writing rather than after, since 0.4.0 already shipped one
+  instruction nothing could follow. `TaskStop` on a completed subagent returns
+  `is not running (status: completed)`; `claude rm` and agent view's `Ctrl+X`
+  act on background sessions, and the agent-view docs say a session's
+  subagents are not among them. With no tool for it, no skill promises it. In
+  the three probes this was checked with (Claude Code 2.1.270), finished
+  subagents dropped out of `ListAgents` on their own within a couple of
+  minutes; how long a terminal's task panel keeps showing them is not
+  documented.
+
 ## 0.4.0 — 2026-09-08
 
 Autopilot stops building. Then the whole plugin was run on a throwaway project

@@ -125,6 +125,13 @@ and each agent lives exactly as long as its authorship does:
 | `reviewer-strict` | **fresh every round** | a reviewer that blessed something in round one is anchored to bless it again. Its cold start is identical on every spawn and therefore cached — carrying its transcript over would cost more, not less |
 | `acceptance` | fresh every round | same reason, plus it must never learn how the thing was built |
 
+No agent outlives its unit. When a step or an acceptance round closes, the loop
+calls `TaskStop` on every agent it spawned for it, so nothing still running can
+commit into the next step's diff or drop a capture into the next round's
+evidence. What it cannot do is take a *finished* agent off the list — no tool
+the orchestrator holds does that, and `TaskStop` refuses a completed subagent —
+but a finished agent costs nothing while it is still listed.
+
 That split is also what keeps a long run affordable. A conversation re-sends
 everything it holds on every turn, so one agent building twenty steps ends up
 paying for the whole plan on the last one. Twenty short-lived implementers do
@@ -196,7 +203,7 @@ stack that is not a browser at all. The agent holds every tool the project has;
 
 ## Status
 
-`0.4.0`. What has actually been run, and what has not — the distinction matters,
+`0.4.1`. What has actually been run, and what has not — the distinction matters,
 because of the bugs found so far, one was caught by running the binary and six
 by reviewers attacking the fix for the previous one. The gate's evidence check
 took seven rewrites.
@@ -277,6 +284,10 @@ took seven rewrites.
 - **`bin/drive` against a browser** in 0.4.0. Its verbs were exercised against
   a live Chromium in 0.3.0 and its logic is unit-tested, but the browser path
   has not been walked since.
+- **Closing a step's agents** (0.4.1). Both of `TaskStop`'s answers — it stops
+  a running subagent, and refuses a finished one with `is not running` — were
+  checked against real subagents on Claude Code 2.1.270. No `autopilot` run
+  has closed a step through the new Phase 4 yet.
 
 Two guarantees are hard — the reviewer has no editing tool in its process, and
 the gate's exit code is a number. Everything else is procedure a model follows.

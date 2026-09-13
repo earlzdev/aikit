@@ -83,8 +83,11 @@ and ask (see the `acceptance-loop` skill: a missing line is not a "no").
 so nothing evicts a step's working detail for you. What you keep past a closed
 step is the outcome and the carry-over list, and that is all. The reviewer
 reports you forwarded during its rounds, the implementer's file lists, the
-verify results: let all of it go. A step that ends "stopped at the round cap" or
-"stopped on reviewer disagreement" ends the milestone too — go to §4.
+verify results: let all of it go. And no agent outlives the step: `step-loop`
+Phase 4 stops every one it spawned before it reports, and the report says how
+many were still running. A report without that line skipped it — close them
+before opening the next step, not after. A step that ends "stopped at the round
+cap" or "stopped on reviewer disagreement" ends the milestone too — go to §4.
 
 **Step notes.** Each step's implementer is a fresh agent that has not seen the
 earlier steps of this milestone, so what they established — a helper to reuse, a
@@ -172,9 +175,11 @@ Stop, keep everything done so far, and report. Never work around any of these:
   history, rotating a credential, sending anything to a third party.
 - **A secret would have to be read or written** to continue.
 
-When you stop: the repo must be in a state the owner can look at. Commit what
-is green, say what is uncommitted and why, and never leave a half-applied fix
-behind an unexplained failure.
+When you stop: the repo must be in a state the owner can look at. Stop any
+agent still running first — `TaskStop` on the ids of the step or acceptance
+round you were in — because a tree an implementer is still committing to is not
+one anybody can look at. Then commit what is green, say what is uncommitted and
+why, and never leave a half-applied fix behind an unexplained failure.
 
 ## 5. The report
 

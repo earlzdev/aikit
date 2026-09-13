@@ -114,7 +114,16 @@ report it and stop. Do not proceed to merge.
 
 ## Phase 1 — round N of the cap
 
-**Put the previous round's captures out of reach first.** From round 2 on,
+**Close the previous round's agent before touching its captures.** From round 2
+on, call `TaskStop` with the last round's acceptance agent id. `is not running
+(status: completed)` is the normal answer and costs nothing. The agent still
+running is the one this is for: it can drop a capture into
+`<evidence>/<milestone>/` after the archive below has run, where this round's
+gate will take it, and every file it writes moves the tree under this round's
+tripwire and voids a run that did nothing wrong. Then drop the id — the new
+round gets a fresh agent, never that one.
+
+**Then put the previous round's captures out of reach.** From round 2 on,
 everything round 1 wrote is still sitting in `<evidence>/<milestone>/`, and the
 gate accepts any capture it finds there. A round that took no actions at all
 can pass by citing the previous round's screenshots — and rounds 2 and 3 exist
@@ -252,8 +261,8 @@ Decision:
 
 - gate returned 0 → Phase 4, acceptance passed;
 - otherwise → a new round, until the cap is spent;
-- **cap spent** → stop, keep every fix, report to the owner with what remains
-  open. Do not merge.
+- **cap spent** → stop, `TaskStop` the last round's agent as Phase 1 does, keep
+  every fix, report to the owner with what remains open. Do not merge.
 
 If you disagree with a finding, do not edit the code and do not drop the
 finding silently. Leave it, and put both positions to the owner. **Only the
@@ -268,6 +277,10 @@ The gate reads that file itself. The record is required not as ceremony: it is
 the only way to see how often the acceptance agent is wrong.
 
 ## Phase 4 — close out
+
+`TaskStop` the last round's acceptance agent first, as Phase 1 does between
+rounds: a verdict written while it is still running is checked against a tree
+and an evidence directory that are still moving.
 
 ```
 "$AIKIT/bin/verdict" gate <milestone> --write ...   # same flags as Phase 2,

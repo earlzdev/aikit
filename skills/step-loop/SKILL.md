@@ -135,7 +135,8 @@ changes, say so before proceeding.
    two agree. You want the work committed at hand-off: Phase 2 hands the
    reviewer a diff range, and an uncommitted tree has none.
 
-Keep its agent id. You will need it every round.
+Keep its agent id. You will need it every round, and Phase 4 needs it once
+more, to close the step.
 
 It returns a short summary and the list of files it changed. **That summary,
 and nothing larger, is what enters your context** — do not ask it for the diff,
@@ -162,8 +163,9 @@ ask it, do not go and look. **Inline**, do it yourself:
 
 ## Phase 2 — review round N of the cap
 
-Announce it: "Review round N of max `<cap>`." Spawn a FRESH reviewer. Its
-prompt MUST contain:
+Announce it: "Review round N of max `<cap>`." Spawn a FRESH reviewer, and add
+its agent id to the step's list beside the implementer's — Phase 4 closes every
+id on it. Its prompt MUST contain:
 
 1. The original task, verbatim — never a paraphrase.
 2. The diff range: `git diff <baseline>..HEAD`. The reviewer reads files
@@ -206,12 +208,30 @@ is recorded, and is raised in Phase 4. Never drop a finding silently.
 list. A fresh reviewer will not re-find them all, and nothing may be lost
 between rounds.
 
-## Phase 4 — report, and let the implementer go
+## Phase 4 — report, and close every agent the step opened
 
-Let the implementer go — stop sending to it; the step is over and its context
-has done its work.
+**Stop every agent this step spawned, before anything else in this phase.**
+Call `TaskStop` on each id in the step's list — the implementer when there is
+one, and every round's reviewer — in one message. Do not first work out which
+of them are still running: `is not running (status: completed)` is the normal
+answer and costs nothing, while remembering which completion notices arrived is
+exactly what a long run's context loses. Then drop the ids. Nothing from this
+step is sent another message, and the next step gets a fresh implementer, never
+this one.
 
-**Write the step notes before you do**, whenever you were given a path. The
+The agent this is for is the one still running — a follow-up you did not wait
+for, a round the loop walked away from, whatever an interrupted run left
+behind. It keeps paying for turns, and an implementer can still commit: into
+the range the *next* step's reviewer is handed as its diff, where it reads as
+that step's work.
+
+**What this cannot do is take a finished agent off the list**, and nothing here
+should promise it. No tool the caller holds deletes a completed subagent:
+`TaskStop` refuses one, and `claude rm` and agent view's `Ctrl+X` act on
+background sessions, not on the subagents a session spawns. A finished agent
+costs nothing while it stays listed.
+
+**Then write the step notes**, whenever you were given a path. The
 implementer's report ends with whatever the next step should reuse or match;
 append those lines to that file, creating it if this was the first step.
 
@@ -249,9 +269,10 @@ for you.
 To the owner, or to whatever invoked this skill: what changed and the
 checkpoint refs (`git diff <baseline>..HEAD`); one line per round (found /
 fixed); the accumulated Medium and Low list; any finding the builder disagreed
-with, both positions stated; and the outcome — **converged clean**, **stopped
-at the round cap** (with what is still open), or **stopped on reviewer
-disagreement** (with both sides).
+with, both positions stated; how many agents `TaskStop` actually stopped —
+zero on a step that ran cleanly, and anything else gets a sentence on why; and
+the outcome — **converged clean**, **stopped at the round cap** (with what is
+still open), or **stopped on reviewer disagreement** (with both sides).
 
 Keep it to that. A caller running twenty of these in a row cannot afford a
 transcript from each.
