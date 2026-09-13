@@ -70,9 +70,9 @@ zones:
 verify_all: "uv run ruff check . && uv run mypy && uv run pytest -q"
 
 review:
-  # Which persona reviews. `reviewer-strict` is the one aikit ships; name a
+  # Which persona reviews. `reviewer` is the one aikit ships; name a
   # project persona instead if the project has zone reviewers of its own.
-  reviewer: reviewer-strict
+  reviewer: reviewer
   # Optional. Omit either key — or the whole block — to inherit the model the
   # run is already using. This is a QUALITY dial that happens to be a cost
   # dial; see "Keys that carry weight". Shown commented out because absent and

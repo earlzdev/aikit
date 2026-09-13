@@ -1,5 +1,5 @@
 ---
-name: reviewer-strict
+name: reviewer
 description: aikit's independent reviewer. Reads the diff, runs the project's own verification itself, reports findings with a machine-parsed verdict line. Cannot edit code — the tool list enforces that, not the instruction.
 tools: Read, Grep, Glob, Bash
 ---

@@ -41,7 +41,7 @@ zones:
 verify_all: "./gradlew check"
 
 review:
-  reviewer: reviewer-strict
+  reviewer: reviewer
   rounds: { develop: 3, fix: 2 }
 
 acceptance:

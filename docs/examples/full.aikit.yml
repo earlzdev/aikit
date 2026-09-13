@@ -46,7 +46,7 @@ verify_all: >-
   uv run pytest -q && docker compose -f docker-compose.yml config -q
 
 review:
-  reviewer: reviewer-strict
+  reviewer: reviewer
   # Both models left inherited, deliberately — the keys would go here:
   #   model:
   #     implementer: opus

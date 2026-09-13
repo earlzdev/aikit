@@ -75,9 +75,11 @@ why it chose what it chose; making a new agent re-derive that from a diff is
 both more expensive and worse.
 
 **The reviewer** — the persona named by `review.reviewer` in `aikit.yml`,
-spawned **fresh every round**. The default, `reviewer-strict`, ships with aikit
-and has no `Write` or `Edit` in its tool list at all: it is *structurally*
-unable to touch code, not merely asked not to.
+spawned **fresh every round**. The default, `reviewer`, ships with aikit and
+has no `Write` or `Edit` in its tool list at all: it is *structurally* unable
+to touch code, not merely asked not to. An older `aikit.yml` may still say
+`reviewer-strict`, the agent's name before it was renamed: spawn `reviewer` for
+it.
 
 Do not substitute "a fresh instance of the builder persona, told to review".
 Such an instance still carries the full tool list it has everywhere else, and

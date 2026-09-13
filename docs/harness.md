@@ -86,7 +86,7 @@ eventually will, and will report a pass. Grant a role, whitelist the tables it
 may read, and hand it to `query` alone.
 
 The same shape appears twice more in aikit, and it is the design rule worth
-taking away: `reviewer-strict` has no `Write` tool, so it cannot patch what it
+taking away: `reviewer` has no `Write` tool, so it cannot patch what it
 reviews; the acceptance brief has no file names, so its blindness to the
 implementation costs nothing to maintain.
 

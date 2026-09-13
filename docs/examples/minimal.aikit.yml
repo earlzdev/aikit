@@ -45,7 +45,7 @@ zones:
 verify_all: "make test-control && make test-edge && make test-infra"
 
 review:
-  reviewer: reviewer-strict
+  reviewer: reviewer
   rounds:
     develop: 3
     fix: 2
