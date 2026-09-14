@@ -1,0 +1,579 @@
+#!/usr/bin/env python3
+"""aikit security-audit hands, and the fence: send HTTP inside a scope, log every
+exchange as a replayable transcript, spend a budget, carry per-role sessions.
+
+WHAT: one command per request. Every request is checked against an allowlist of
+      targets BEFORE it leaves, written to disk as a transcript the refuter can
+      replay verbatim, and charged against a request/time budget. `replay` re-sends
+      a saved transcript so a proof of concept is a file, not a paragraph.
+
+WHY it is a tool and not an instruction. Active hunting sends real payloads at a
+      running service. "Only attack the stand" written in an agent's prompt holds
+      until the agent follows a link in a response body to a third-party host, or
+      talks itself into "just checking prod quickly". The fence is a program: a
+      request outside `--target` never opens a socket, and a non-loopback target
+      needs `--authorized` — the owner attesting, once, that they own it. The same
+      shape as the acceptance gate (a rule the harness enforces, not one the model
+      is asked to keep) and the reviewer's missing Write tool.
+
+WHY the transcript is the unit of evidence. The audit's whole claim is that a
+      finding is paid for with an exploit the SERVICE produced, replayable by a
+      second agent that did not write it — never with the hunter's prose. So every
+      request writes `<evidence>/<run>/<name>.http`: the request line, headers and
+      body, then the response. `replay <that file>` sends the request again against
+      a fresh stand; the refuter reads whether the boundary still gives way.
+
+WHY per-role sessions. The bugs worth finding are authorization bugs — tenant A
+      reading tenant B, anon reaching an admin route. That needs more than one
+      identity live at once, so cookies and pinned headers are kept per role and
+      selected with `--role`.
+
+HOW:  the fence (scope matching, loopback detection), the budget, target parsing
+      and transcript serialise/parse are plain data and unit-tested
+      (`tests/test_probe.py`). Everything that opens a socket is confined to `_send`
+      near the bottom and needs no test to be trusted — the rules above it do.
+
+    probe begin audit --target http://localhost:3000 --requests 800 --minutes 40
+    probe auth tenantA --header 'Authorization: Bearer eyJ…'
+    probe request GET  'http://localhost:3000/api/orders/1042' --role tenantA
+    probe request POST 'http://localhost:3000/login' --role tenantB --json '{"u":"b","p":"b"}'
+    probe replay audit/poc-01.http --role tenantA      # the refuter's verb
+    probe end
+"""
+
+from __future__ import annotations
+
+import argparse
+import ipaddress
+import json
+import pathlib
+import socket
+import sys
+import time
+import urllib.error
+import urllib.request
+from dataclasses import asdict, dataclass, field
+from typing import Any
+from urllib.parse import urlsplit
+
+DEFAULT_REQUESTS = 800
+DEFAULT_MINUTES = 40
+# A response body worth reading is rarely larger than this, and a transcript that
+# grows without bound is a transcript nobody opens. The cap is HONEST: how much
+# was cut is recorded in the transcript.
+BODY_CAP = 64 * 1024
+# What the agent gets printed back per request. The full body is in the transcript
+# on disk; the terminal echo only needs to let the agent decide the next move.
+ECHO_CAP = 4 * 1024
+
+DEFAULT_PORTS = {"http": 80, "https": 443, "": 80}
+
+
+class Exhausted(RuntimeError):
+    """A budget ran out. The message goes into the report verbatim."""
+
+
+class OutOfScope(RuntimeError):
+    """A request aimed outside the allowlist, or at a non-loopback host with no
+    attestation. Raised BEFORE any socket opens — this is the fence."""
+
+
+class BadTranscript(ValueError):
+    pass
+
+
+# -- targets and the fence ----------------------------------------------------
+
+@dataclass(frozen=True)
+class Target:
+    """One allowed origin, optionally narrowed to a path prefix. `scheme` empty
+    means either http or https; `port` None means the scheme's default."""
+
+    host: str
+    port: int | None
+    path: str = "/"
+    scheme: str = ""
+
+    def covers(self, scheme: str, host: str, port: int, path: str) -> bool:
+        if self.scheme and self.scheme != scheme:
+            return False
+        if self.host.lower() != host.lower():
+            return False
+        want = self.port if self.port is not None else DEFAULT_PORTS.get(self.scheme or scheme, 80)
+        if want != port:
+            return False
+        return path.startswith(self.path)
+
+
+def parse_target(spec: str) -> Target:
+    """`http://localhost:3000`, `localhost:3000`, `10.0.0.5:8080/api` all parse.
+    A bare `host:port` with no scheme matches either scheme on that port."""
+    spec = spec.strip()
+    if not spec:
+        raise OutOfScope("empty target")
+    if "//" not in spec:
+        spec = "//" + spec  # let urlsplit see host:port without inventing a scheme
+    parts = urlsplit(spec)
+    host = parts.hostname
+    if not host:
+        raise OutOfScope(f"target {spec!r} has no host")
+    return Target(host=host, port=parts.port, path=parts.path or "/",
+                  scheme=(parts.scheme or ""))
+
+
+def split_url(url: str) -> tuple[str, str, int, str]:
+    """(scheme, host, port, path) with the scheme's default port filled in."""
+    parts = urlsplit(url)
+    if not parts.scheme or not parts.hostname:
+        raise OutOfScope(f"url {url!r} must be absolute (scheme://host…)")
+    port = parts.port if parts.port is not None else DEFAULT_PORTS.get(parts.scheme, 80)
+    return parts.scheme, parts.hostname, port, (parts.path or "/")
+
+
+def is_loopback(host: str) -> bool:
+    """localhost, 127.0.0.0/8, ::1. A LAN or public address is NOT loopback and
+    therefore needs `--authorized`: the owner saying out loud they own it."""
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False  # a hostname other than localhost — treat as remote
+
+
+def check_scope(url: str, targets: tuple[Target, ...], authorized: bool) -> None:
+    """The fence. Raises OutOfScope if the request may not be sent. No socket is
+    opened until this returns cleanly."""
+    scheme, host, port, path = split_url(url)
+    if not any(t.covers(scheme, host, port, path) for t in targets):
+        allowed = ", ".join(_show(t) for t in targets) or "(none)"
+        raise OutOfScope(
+            f"{host}:{port}{path} is not in scope. Allowed: {allowed}. "
+            f"The audit attacks only what you pointed it at — nothing else."
+        )
+    if not is_loopback(host) and not authorized:
+        raise OutOfScope(
+            f"{host} is not a loopback address, and this run is not authorized for it. "
+            f"Point the audit at a disposable stand you own, or set "
+            f"`security.scope.authorized: true` to attest that you own {host}."
+        )
+
+
+def _show(t: Target) -> str:
+    scheme = f"{t.scheme}://" if t.scheme else ""
+    port = f":{t.port}" if t.port is not None else ""
+    return f"{scheme}{t.host}{port}{t.path}"
+
+
+# -- state --------------------------------------------------------------------
+
+@dataclass
+class Role:
+    """One identity kept alive across requests: a cookie jar it accumulates and
+    headers pinned for it (a bearer token, an API key)."""
+
+    headers: dict[str, str] = field(default_factory=dict)
+    cookies: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class Run:
+    run: str
+    started: float
+    max_requests: int
+    minutes: int
+    targets: list[str]          # stored as their original specs; re-parsed on load
+    authorized: bool = False
+    requests: int = 0
+    seq: int = 0
+    roles: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def elapsed_minutes(self) -> float:
+        return (time.time() - self.started) / 60.0
+
+    def parsed_targets(self) -> tuple[Target, ...]:
+        return tuple(parse_target(s) for s in self.targets)
+
+    def role(self, name: str) -> Role:
+        raw = self.roles.get(name)
+        if raw is None:
+            role = Role()
+            self.roles[name] = asdict(role)
+            return role
+        return Role(headers=dict(raw.get("headers", {})),
+                    cookies=dict(raw.get("cookies", {})))
+
+    def put_role(self, name: str, role: Role) -> None:
+        self.roles[name] = asdict(role)
+
+    def charge(self, now: float | None = None) -> None:
+        """Spend one request. Checked BEFORE the send — a run that discovers it is
+        over budget having already fired has attacked the stand without recording
+        what came back."""
+        elapsed = ((now if now is not None else time.time()) - self.started) / 60.0
+        if self.requests >= self.max_requests:
+            raise Exhausted(
+                f"request budget spent: {self.requests}/{self.max_requests}. "
+                f'Report where you got to — this is "could not", not "clean".'
+            )
+        if elapsed >= self.minutes:
+            raise Exhausted(
+                f"time budget spent: {elapsed:.0f}/{self.minutes} minutes. "
+                f'Report where you got to — this is "could not", not "clean".'
+            )
+        self.requests += 1
+        self.seq += 1
+
+
+def state_path(root: pathlib.Path) -> pathlib.Path:
+    return root / "current.json"
+
+
+def load(root: pathlib.Path) -> Run:
+    path = state_path(root)
+    if not path.is_file():
+        raise SystemExit("[probe] no run in progress — start with `probe begin <run> --target …`")
+    return Run(**json.loads(path.read_text(encoding="utf-8")))
+
+
+def save(root: pathlib.Path, run: Run) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    state_path(root).write_text(json.dumps(asdict(run), indent=2), encoding="utf-8")
+
+
+def evidence_dir(root: pathlib.Path, run: str) -> pathlib.Path:
+    return root / run
+
+
+def transcript_name(run: Run, name: str) -> str:
+    """`006-idor.http` — ordered so a run's transcripts read as a sequence, and
+    slugged so nothing an agent types reaches the filesystem."""
+    slug = "".join(c if c.isalnum() or c in "-_" else "-" for c in (name or "req")).strip("-")
+    return f"{run.seq:03d}-{slug or 'req'}.http"
+
+
+# -- transcripts --------------------------------------------------------------
+# A transcript is human-readable HTTP with `> ` request lines and `< ` response
+# lines, and it round-trips: `parse_request` reads back exactly what `replay`
+# needs to send it again. The response half is for the human and the refuter to
+# read; only the request half is replayed.
+
+@dataclass(frozen=True)
+class Exchange:
+    method: str
+    url: str
+    req_headers: dict[str, str]
+    req_body: str
+    status: int
+    reason: str
+    resp_headers: dict[str, str]
+    resp_body: str
+    truncated: int = 0
+    role: str = ""
+
+
+def render_transcript(x: Exchange) -> str:
+    out = ["### aikit probe transcript", f"# role: {x.role or '(none)'}", ""]
+    out.append(f"> {x.method} {x.url}")
+    for key, value in x.req_headers.items():
+        out.append(f"> {key}: {value}")
+    out.append(">")
+    for line in x.req_body.splitlines() or [""]:
+        out.append(f"> {line}")
+    out.append("")
+    out.append(f"< {x.status} {x.reason}")
+    for key, value in x.resp_headers.items():
+        out.append(f"< {key}: {value}")
+    out.append("<")
+    for line in x.resp_body.splitlines() or [""]:
+        out.append(f"< {line}")
+    if x.truncated:
+        out.append(f"< … {x.truncated} bytes of body truncated")
+    return "\n".join(out) + "\n"
+
+
+def parse_request(text: str) -> tuple[str, str, dict[str, str], str]:
+    """Read the request half of a transcript back into (method, url, headers, body).
+    Only `> ` lines are consulted; the response is ignored."""
+    method = url = None
+    headers: dict[str, str] = {}
+    body_lines: list[str] = []
+    in_body = False
+    for raw in text.splitlines():
+        if not raw.startswith(">"):
+            continue
+        content = raw[1:]
+        if content.startswith(" "):
+            content = content[1:]
+        if method is None:
+            first = content.split(None, 1)
+            if len(first) != 2:
+                raise BadTranscript(f"first request line is not `METHOD URL`: {content!r}")
+            method, url = first[0], first[1].strip()
+            continue
+        if not in_body:
+            if content == "":            # the blank `>` between headers and body
+                in_body = True
+                continue
+            key, sep, value = content.partition(":")
+            if not sep:
+                raise BadTranscript(f"header line without a colon: {content!r}")
+            headers[key.strip()] = value.strip()
+        else:
+            body_lines.append(content)
+    if method is None or url is None:
+        raise BadTranscript("no request line found (a `> METHOD URL` line)")
+    return method, url, headers, "\n".join(body_lines).strip("\n")
+
+
+# -- cookies ------------------------------------------------------------------
+
+def merge_set_cookie(jar: dict[str, str], set_cookie_values: list[str]) -> None:
+    """Keep the name=value pair, drop the attributes. Enough for a session cookie
+    on a test stand; a real cookie policy is not this tool's job."""
+    for header in set_cookie_values:
+        pair = header.split(";", 1)[0].strip()
+        if "=" in pair:
+            name, _, value = pair.partition("=")
+            jar[name.strip()] = value.strip()
+
+
+def cookie_header(jar: dict[str, str]) -> str:
+    return "; ".join(f"{k}={v}" for k, v in jar.items())
+
+
+# -- the socket, and only the socket ------------------------------------------
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Never follow a redirect. A 302 to `/login`, or to an attacker's host on an
+    open-redirect, is itself the finding — following it hides it."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: N802
+        return None
+
+
+def _send(method: str, url: str, headers: dict[str, str], body: str,
+          timeout: float = 20.0) -> tuple[int, str, dict[str, str], list[str], bytes]:
+    data = body.encode("utf-8") if body else None
+    request = urllib.request.Request(url, data=data, method=method.upper())
+    for key, value in headers.items():
+        request.add_header(key, value)
+    opener = urllib.request.build_opener(_NoRedirect)
+    try:
+        resp = opener.open(request, timeout=timeout)
+        status, reason, raw = resp.status, resp.reason, resp.read(BODY_CAP + 1)
+        resp_headers = dict(resp.headers.items())
+        set_cookie = resp.headers.get_all("Set-Cookie") or []
+    except urllib.error.HTTPError as exc:      # 4xx/5xx are responses, not errors
+        status, reason, raw = exc.code, exc.reason, exc.read(BODY_CAP + 1)
+        resp_headers = dict(exc.headers.items())
+        set_cookie = exc.headers.get_all("Set-Cookie") or []
+    except (urllib.error.URLError, socket.timeout, ConnectionError) as exc:
+        raise SystemExit(
+            f"[probe] {method} {url} did not connect: {exc}. "
+            f"Is the stand up? (`security.stand.up`)"
+        ) from None
+    return status, reason, resp_headers, set_cookie, raw
+
+
+def _do_send(run: Run, root: pathlib.Path, *, method: str, url: str, role_name: str,
+             extra_headers: dict[str, str], body: str, content_type: str,
+             name: str) -> Exchange:
+    """Charge, fence, send, record. The one path that reaches the network."""
+    check_scope(url, run.parsed_targets(), run.authorized)   # fence first
+    run.charge()                                             # then budget
+
+    role = run.role(role_name) if role_name else Role()
+    headers = dict(role.headers)
+    headers.update(extra_headers)
+    if content_type and "Content-Type" not in {k.title() for k in headers}:
+        headers["Content-Type"] = content_type
+    if role.cookies:
+        headers["Cookie"] = cookie_header(role.cookies)
+
+    status, reason, resp_headers, set_cookie, raw = _send(method, url, headers, body)
+
+    if role_name:
+        merge_set_cookie(role.cookies, set_cookie)
+        run.put_role(role_name, role)
+
+    truncated = max(0, len(raw) - BODY_CAP)
+    text = raw[:BODY_CAP].decode("utf-8", "replace")
+    exchange = Exchange(method=method.upper(), url=url, req_headers=headers, req_body=body,
+                        status=status, reason=reason, resp_headers=resp_headers,
+                        resp_body=text, truncated=truncated, role=role_name)
+
+    out = evidence_dir(root, run.run)
+    out.mkdir(parents=True, exist_ok=True)
+    fname = transcript_name(run, name)
+    (out / fname).write_text(render_transcript(exchange), encoding="utf-8")
+    save(root, run)
+
+    echo = text[:ECHO_CAP] + (f"\n… {len(text) - ECHO_CAP} more chars" if len(text) > ECHO_CAP else "")
+    print(f"[probe] {status} {reason} · {method.upper()} {url} · role={role_name or '(none)'}")
+    for key in ("Location", "Set-Cookie", "Content-Type", "WWW-Authenticate"):
+        if key in resp_headers:
+            print(f"    {key}: {resp_headers[key]}")
+    print(f"    transcript: {fname} · request {run.requests}/{run.max_requests} · "
+          f"{run.elapsed_minutes:.0f}/{run.minutes} min")
+    print(echo)
+    return exchange
+
+
+# -- CLI ----------------------------------------------------------------------
+
+def _headers(pairs: list[str]) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for pair in pairs or []:
+        key, sep, value = pair.partition(":")
+        if not sep:
+            raise SystemExit(f"[probe] header {pair!r} is not `Key: Value`")
+        out[key.strip()] = value.strip()
+    return out
+
+
+def cmd_request(args: argparse.Namespace) -> int:
+    root = args.evidence_root
+    run = load(root)
+    body, content_type = args.data or "", ""
+    if args.json is not None:
+        body, content_type = args.json, "application/json"
+    try:
+        _do_send(run, root, method=args.method, url=args.url, role_name=args.role,
+                 extra_headers=_headers(args.header), body=body, content_type=content_type,
+                 name=args.name or args.method.lower())
+    except OutOfScope as exc:
+        print(f"[probe] refused: {exc}", file=sys.stderr)
+        return 3
+    except Exhausted as exc:
+        print(f"[probe] {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
+def cmd_replay(args: argparse.Namespace) -> int:
+    root = args.evidence_root
+    run = load(root)
+    path = pathlib.Path(args.transcript)
+    if not path.is_absolute() and not path.exists():
+        path = evidence_dir(root, run.run) / args.transcript
+    if not path.is_file():
+        raise SystemExit(f"[probe] no transcript at {path}")
+    method, url, headers, body = parse_request(path.read_text(encoding="utf-8"))
+    if args.header:
+        headers.update(_headers(args.header))
+    try:
+        _do_send(run, root, method=method, url=url, role_name=args.role,
+                 extra_headers=headers, body=body, content_type="",
+                 name=args.name or f"replay-{path.stem}")
+    except OutOfScope as exc:
+        print(f"[probe] refused: {exc}", file=sys.stderr)
+        return 3
+    except Exhausted as exc:
+        print(f"[probe] {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
+def cmd_auth(args: argparse.Namespace) -> int:
+    root = args.evidence_root
+    run = load(root)
+    role = run.role(args.role)
+    role.headers.update(_headers(args.header))
+    run.put_role(args.role, role)
+    save(root, run)
+    print(f"[probe] role {args.role}: {len(role.headers)} header(s) pinned")
+    return 0
+
+
+def cmd_scope(args: argparse.Namespace) -> int:
+    run = load(args.evidence_root)
+    print(f"[probe] run {run.run} · authorized={run.authorized}")
+    for target in run.parsed_targets():
+        print(f"    allow: {_show(target)}")
+    print(f"    spent {run.requests}/{run.max_requests} requests · "
+          f"{run.elapsed_minutes:.0f}/{run.minutes} min · roles: "
+          f"{', '.join(run.roles) or '(none)'}")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="aikit security-audit hands and fence")
+    parser.add_argument("--evidence-root", dest="evidence_root", type=pathlib.Path,
+                        default=pathlib.Path(".security"))
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    begin = sub.add_parser("begin", help="start a run: set the scope and the budget")
+    begin.add_argument("run")
+    begin.add_argument("--target", action="append", default=[], required=True,
+                       help="an allowed origin, repeatable: http://localhost:3000")
+    begin.add_argument("--authorized", action="store_true",
+                       help="attest you own a non-loopback target (from scope.authorized)")
+    begin.add_argument("--requests", type=int, default=DEFAULT_REQUESTS)
+    begin.add_argument("--minutes", type=int, default=DEFAULT_MINUTES)
+
+    req = sub.add_parser("request", help="send one request (fenced, logged, charged)")
+    req.add_argument("method")
+    req.add_argument("url")
+    req.add_argument("--role", default="")
+    req.add_argument("--header", action="append", default=[])
+    req.add_argument("--data", default=None, help="raw request body")
+    req.add_argument("--json", default=None, help="JSON body; sets Content-Type")
+    req.add_argument("--name", default="", help="name for the transcript file")
+
+    replay = sub.add_parser("replay", help="re-send a saved transcript (the refuter's verb)")
+    replay.add_argument("transcript", help="a transcript filename in the run's evidence dir, or a path")
+    replay.add_argument("--role", default="")
+    replay.add_argument("--header", action="append", default=[])
+    replay.add_argument("--name", default="")
+
+    auth = sub.add_parser("auth", help="pin headers (a bearer token, an API key) for a role")
+    auth.add_argument("role")
+    auth.add_argument("--header", action="append", default=[], required=True)
+
+    sub.add_parser("scope", help="show the allowlist and what is spent")
+    sub.add_parser("end", help="finish the run")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    root = args.evidence_root
+
+    if args.command == "begin":
+        parse_target_all = [parse_target(t) for t in args.target]  # validate now, fail early
+        run = Run(run=args.run, started=time.time(), max_requests=args.requests,
+                  minutes=args.minutes, targets=list(args.target), authorized=args.authorized)
+        # Refuse at begin, not at first request: an unauthorized remote target is
+        # a mistake to catch before a run is even set up.
+        for target in parse_target_all:
+            if not is_loopback(target.host) and not args.authorized:
+                raise SystemExit(
+                    f"[probe] {target.host} is not loopback and this run is not authorized. "
+                    f"Set `security.scope.authorized: true` to attest you own it, or point at a "
+                    f"local stand."
+                )
+        evidence_dir(root, run.run).mkdir(parents=True, exist_ok=True)
+        save(root, run)
+        print(f"[probe] run {run.run} started · scope {', '.join(args.target)} · "
+              f"authorized={run.authorized} · budget {run.max_requests} requests, {run.minutes} min")
+        return 0
+
+    if args.command == "end":
+        run = load(root)
+        state_path(root).unlink(missing_ok=True)
+        print(f"[probe] run {run.run} finished · spent {run.requests} requests, "
+              f"{run.elapsed_minutes:.0f} min")
+        return 0
+
+    return {
+        "request": cmd_request,
+        "replay": cmd_replay,
+        "auth": cmd_auth,
+        "scope": cmd_scope,
+    }[args.command](args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

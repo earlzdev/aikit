@@ -2,6 +2,51 @@
 
 Newest first. What changed, and why.
 
+## 0.5.0 — 2026-09-14
+
+A security audit that has to prove what it finds — standalone, not wired into
+autopilot.
+
+`/aikit:security-audit` attacks a running stand you own and keeps only the
+findings it can demonstrate. It borrows acceptance's shape — a disposable stand,
+evidence the product produced, a mechanical gate — and points it at breaking the
+service instead of using it. The step reviewer and the acceptance agent each see
+one milestone; a security hole often lives in how steps combine, where neither
+is looking.
+
+- **A finding is paid for with a replayable proof of concept, never prose.**
+  `bin/probe` logs every request as a transcript on disk; a `security-hunter`
+  cites that transcript as the PoC, and a `security-refuter` — a fresh agent,
+  ideally on a different model, with no Write tool and no ability to file
+  findings of its own — replays it against a clean stand and tries to disprove
+  it. Only what survives refutation blocks. Same "prove it, don't assert it" the
+  acceptance gate already enforces with screenshots.
+- **`bin/probe` is the fence, not just the hands.** A request outside
+  `security.scope.targets` never opens a socket, and a non-loopback target is
+  refused unless the owner attested to owning it (`scope.authorized: true`).
+  Only-my-services is a target the tool will not send to, not a promise in a
+  prompt. It also carries per-role sessions, so authorization bugs — one tenant
+  reading another — are reachable at all.
+- **`verdict security` is the gate.** An exploitable finding must carry a PoC
+  that is on disk and that the refuter confirmed, or the report is defective and
+  blocks (exit 2), exactly like an acceptance run that never looked at the data.
+  Exit 1 means real findings survived — the audit did its job; exit 0 is clean.
+- **It reports; it never fixes.** A whole-service audit finds holes in code no
+  milestone asked to change — that is new scope, the owner's to plan. Findings
+  become `/aikit:plan` milestones, reviewed like any other change. The finder is
+  never the fixer.
+- **Black, gray or white box** is one knob — how much source the hunter may read
+  while it attacks. The loop is identical; white and gray are guarded by the
+  same working-tree tripwire acceptance uses, so a hunter that edited the code
+  it was auditing voids the run.
+- **`/aikit:init` now interviews for it**, reusing the acceptance stand and
+  roles, and its "prove it" pass gained a fence check (out-of-scope refused) and
+  a gate check (a blanked report is rejected).
+
+New this release: `skills/security-audit`, `agents/security-hunter`,
+`agents/security-refuter`, `bin/probe`, `docs/security-audit.md`, and the
+`security` subcommand in `bin/verdict`. Full reference: `docs/security-audit.md`.
+
 ## 0.4.1 — 2026-09-13
 
 Each step now closes the agents it opened.

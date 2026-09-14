@@ -86,6 +86,33 @@ acceptance:
       url: "http://customer.example.test/"
   seed: "an empty customer named `acceptance`, with a small token ceiling"
 
+# The standalone security audit — `/aikit:security-audit`. Not part of autopilot
+# and not tied to a milestone: it attacks a running stand you own, proves what it
+# finds with replayable transcripts, ranks it, and hands findings back to plan.
+# Full reference: docs/security-audit.md.
+security:
+  box: gray                    # black | gray | white — how much source the hunter gets
+  scan: "gitleaks detect --no-banner && osv-scanner -r ."
+  threat_model: docs/security/threat-model.md
+  scope:
+    targets: ["http://localhost:3000"]
+    authorized: false          # true ONLY to attest you own a NON-loopback target
+  stand:
+    up:   "scripts/sec/stand.sh up"
+    down: "scripts/sec/stand.sh down"
+  roles:
+    - name: anon
+    - name: tenantA
+      auth: "header:Authorization=Bearer <token-A the stand seeds>"
+    - name: tenantB
+      auth: "login:scripts/sec/login.sh tenantB"
+  truth:
+    kind: command
+    use: "scripts/sec/query.py"          # read-only role — confirms a real leak
+  budget: { requests: 800, minutes: 40 }
+  rounds: 2                     # attempts to earn a TRUSTWORTHY report, not to hunt more
+  tripwire_ignore: ["__pycache__", "*.pyc"]
+
 git:
   main: develop        # work lands here by PR; the release branch is the owner's
   branch_prefix: "task/"

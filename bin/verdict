@@ -768,6 +768,348 @@ def run_gate(milestone: str, *, write: bool, tracker: pathlib.Path,
     return 1 if decision.blocked else 0
 
 
+# =============================================================================
+# The security-audit gate. A different report from acceptance's — its unit of
+# evidence is a REPLAYABLE proof of concept, not a screenshot — so it gets its
+# own parse/gate/render rather than bending the acceptance one. It shares the
+# working-tree tripwire above, for the white/gray-box case where the hunter can
+# see the source it is attacking.
+#
+# WHY it blocks the way it does. The audit's whole claim is that a finding is
+# paid for with an exploit the SERVICE produced, replayed by a second agent that
+# did not write it. So a finding CLASSED exploitable must carry a proof of
+# concept that is on disk and that the refuter CONFIRMED. "I think this is
+# exploitable" with no replaying transcript is exactly the prose the gate exists
+# to refuse — the same discipline as the acceptance gate's screenshot rule.
+# =============================================================================
+
+EXPLOITABLE = "exploitable"
+UNPROVEN = "unproven"
+HARDENING = "hardening"
+SEC_CLASSES = (EXPLOITABLE, UNPROVEN, HARDENING)
+SEC_BLOCKING = (EXPLOITABLE,)
+
+SEVERITIES = ("critical", "high", "medium", "low")
+
+CONFIRMED = "confirmed"
+DISPROVEN = "disproven"
+SEC_REPORT_NAME = "audit.json"
+
+# Localized class names accepted in a report, mapped back to the machine key.
+SEC_ALIASES = {
+    EXPLOITABLE: EXPLOITABLE, UNPROVEN: UNPROVEN, HARDENING: HARDENING,
+    "эксплуатируется": EXPLOITABLE, "не доказано": UNPROVEN, "упрочнение": HARDENING,
+}
+
+SEC_LABELS: dict[str, dict[str, str]] = {
+    "en": {
+        EXPLOITABLE: "exploitable", UNPROVEN: "unproven", HARDENING: "hardening",
+        "verdict": "Security audit", "clean": "CLEAN — nothing exploitable found",
+        "findings": "FINDINGS — action needed", "defective": "DEFECTIVE — this run cannot be trusted",
+        "exploit_head": "Exploitable", "unproven_head": "Unproven (for you to judge)",
+        "hardening_head": "Hardening (not blocking)", "defects": "Report defects",
+        "not_reached": "What I could not reach, and why", "scanner": "Scanners",
+        "spend": "Spend", "requests": "requests", "minutes": "minutes", "round": "round",
+    },
+    "ru": {
+        EXPLOITABLE: "эксплуатируется", UNPROVEN: "не доказано", HARDENING: "упрочнение",
+        "verdict": "Аудит безопасности", "clean": "ЧИСТО — эксплуатируемого не найдено",
+        "findings": "НАХОДКИ — нужны действия", "defective": "ДЕФЕКТ — этому прогону нельзя верить",
+        "exploit_head": "Эксплуатируется", "unproven_head": "Не доказано (решать вам)",
+        "hardening_head": "Упрочнение (не блокирует)", "defects": "Дефекты отчёта",
+        "not_reached": "Чего не смог достичь и почему", "scanner": "Сканеры",
+        "spend": "Расход", "requests": "запросов", "minutes": "минут", "round": "круг",
+    },
+}
+
+
+def sec_label(lang: str, key: str) -> str:
+    return SEC_LABELS.get(lang, SEC_LABELS["en"]).get(key, SEC_LABELS["en"].get(key, key))
+
+
+@dataclass(frozen=True)
+class SecFinding:
+    klass: str
+    severity: str
+    title: str
+    attacker: str
+    entry_point: str
+    boundary: str
+    impact: str
+    poc: str
+    refuter: str
+    evidence: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class SecReport:
+    target: str
+    box: str
+    round: int
+    findings: tuple[SecFinding, ...]
+    not_reached: str
+    scanner: dict[str, Any] = field(default_factory=dict)
+    spend: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class SecDecision:
+    blocked: bool               # a defect, or a confirmed exploit — the run needs action
+    exploitable: tuple[SecFinding, ...]
+    unproven: tuple[SecFinding, ...]
+    hardening: tuple[SecFinding, ...]
+    defects: tuple[str, ...]
+
+
+def parse_security(data: Any) -> SecReport:
+    """Strict on purpose: the report is a protocol between the audit and this
+    gate, and a field swallowed quietly here is a check not made."""
+    if not isinstance(data, dict):
+        raise BadReport("the report must be a JSON object")
+
+    target = str(data.get("target", "")).strip()
+    if not target:
+        raise BadReport("no target named (`target`)")
+
+    try:
+        rnd = int(data.get("round", 1))
+    except (TypeError, ValueError):
+        raise BadReport("`round` must be a number") from None
+
+    raw_findings = data.get("findings")
+    if raw_findings is None:
+        raw_findings = []
+    if not isinstance(raw_findings, list):
+        raise BadReport("`findings` must be a list (empty is allowed — a clean audit)")
+
+    findings = []
+    for i, raw in enumerate(raw_findings):
+        if not isinstance(raw, dict):
+            raise BadReport(f"findings[{i}]: expected an object")
+        klass = SEC_ALIASES.get(str(raw.get("class", "")).strip().lower())
+        if klass is None:
+            raise BadReport(
+                f"findings[{i}]: unknown class {raw.get('class')!r} — "
+                f"expected one of {', '.join(SEC_CLASSES)}"
+            )
+        severity = str(raw.get("severity", "")).strip().lower()
+        if severity not in SEVERITIES:
+            raise BadReport(
+                f"findings[{i}]: `severity` must be one of {', '.join(SEVERITIES)}, "
+                f"not {raw.get('severity')!r}"
+            )
+        required = {}
+        for key in ("title", "attacker", "entry_point", "boundary", "impact"):
+            value = str(raw.get(key, "")).strip()
+            if not value:
+                raise BadReport(f"findings[{i}]: `{key}` is empty — a finding names "
+                                "who attacks, where they enter, which boundary breaks, "
+                                "and what it costs")
+            required[key] = value
+        refuter = str(raw.get("refuter", "")).strip().lower()
+        findings.append(SecFinding(
+            klass=klass, severity=severity, poc=str(raw.get("poc", "")).strip(),
+            refuter=refuter, evidence=_strs(raw.get("evidence"), f"findings[{i}].evidence"),
+            **required))
+
+    raw_scanner = data.get("scanner")
+    if raw_scanner is not None and not isinstance(raw_scanner, dict):
+        raise BadReport("`scanner` must be an object of tool → result")
+
+    return SecReport(
+        target=target, box=str(data.get("box", "")).strip() or "black", round=rnd,
+        findings=tuple(findings), not_reached=str(data.get("not_reached", "")).strip(),
+        scanner=raw_scanner or {}, spend=data.get("spend") or {})
+
+
+def _sec_malformed(n: str) -> bool:
+    """A proof-of-concept filename is ONE plain file in the evidence directory —
+    the same rule the acceptance gate holds a screenshot to, and for the same
+    reason: a path, an empty name, or a sentence is not a transcript on disk."""
+    return (not n or "/" in n or "\\" in n or n in (".", "..")
+            or n == SEC_REPORT_NAME or any(c.isspace() for c in n)
+            or n.startswith(".")
+            or pathlib.PurePosixPath(n).is_absolute())
+
+
+def security_defects(report: SecReport, *,
+                     tree: tuple[str, str, tuple[str, ...]] | None = None,
+                     evidence_dir: pathlib.Path | None = None) -> tuple[str, ...]:
+    out: list[str] = []
+
+    if tree is not None:
+        expected, actual, moved = tree
+        if actual == "":
+            out.append("the working tree could not be fingerprinted, so it is unknown "
+                       "whether the audit changed the code it was judging")
+        elif expected != actual:
+            named = ", ".join(moved[:5]) + ("…" if len(moved) > 5 else "")
+            out.append(f"the working tree changed during the audit: {named or '(paths unknown)'}. "
+                       "The audit reports; it does not fix. A run that edited the code it was "
+                       "judging is void. If these are generated files, pass --tree-ignore")
+
+    if not report.not_reached:
+        out.append('the mandatory "what I could not reach, and why" line is missing — '
+                   "its absence reads as total coverage, which no audit has")
+
+    present: set[str] = set()
+    if evidence_dir is not None:
+        try:
+            with os.scandir(evidence_dir) as it:
+                present = {e.name for e in it if e.is_file(follow_symlinks=False)}
+        except OSError:
+            present = set()
+
+    for f in report.findings:
+        # A confirmed exploit MUST be classed exploitable, and an exploitable
+        # finding MUST be confirmed by the refuter — the two halves of the same
+        # rule. Either alone is a report that has not reconciled hunt with refute.
+        if f.refuter == CONFIRMED and f.klass != EXPLOITABLE:
+            out.append(f'"{f.title}" was confirmed by the refuter but is not classed '
+                       f"{EXPLOITABLE} — a confirmed exploit is exploitable")
+        if f.klass != EXPLOITABLE:
+            continue
+        if f.refuter != CONFIRMED:
+            answer = f.refuter or "no answer"
+            out.append(f'"{f.title}" is classed {EXPLOITABLE} but the refuter did not '
+                       f"confirm it ({answer}). Drop it, or downgrade it to {UNPROVEN}")
+        if not f.poc:
+            out.append(f'"{f.title}" is classed {EXPLOITABLE} with no proof of concept — '
+                       "a claim with no replaying transcript is prose, not an exploit")
+        elif _sec_malformed(f.poc):
+            out.append(f'"{f.title}": proof of concept {f.poc!r} is not a plain transcript '
+                       "filename (no path, no spaces, not empty)")
+        elif evidence_dir is not None and f.poc not in present:
+            out.append(f'"{f.title}": proof of concept {f.poc!r} is not in {evidence_dir} — '
+                       "a transcript that is not on disk cannot be replayed")
+
+    return tuple(out)
+
+
+def security_gate(report: SecReport, *,
+                  tree: tuple[str, str, tuple[str, ...]] | None = None,
+                  evidence_dir: pathlib.Path | None = None) -> SecDecision:
+    by_class = {c: tuple(f for f in report.findings if f.klass == c) for c in SEC_CLASSES}
+    found = security_defects(report, tree=tree, evidence_dir=evidence_dir)
+    confirmed_exploit = tuple(f for f in by_class[EXPLOITABLE] if f.refuter == CONFIRMED)
+    return SecDecision(
+        blocked=bool(found or confirmed_exploit),
+        exploitable=by_class[EXPLOITABLE],
+        unproven=by_class[UNPROVEN],
+        hardening=by_class[HARDENING],
+        defects=found)
+
+
+def _sec_finding_line(f: SecFinding, lang: str) -> str:
+    sev = f.severity.upper()
+    poc = f" · poc:{f.poc}" if f.poc else ""
+    ev = f" [{', '.join(f.evidence)}]" if f.evidence else ""
+    return (f"- **{sev}** {f.title}\n"
+            f"  {f.attacker} → {f.entry_point} → breaks {f.boundary} → {f.impact}{poc}{ev}")
+
+
+def _sev_rank(f: SecFinding) -> int:
+    return SEVERITIES.index(f.severity) if f.severity in SEVERITIES else len(SEVERITIES)
+
+
+def render_security(report: SecReport, decision: SecDecision, lang: str = "en") -> str:
+    if decision.defects:
+        head = sec_label(lang, "defective")
+    elif decision.exploitable:
+        head = sec_label(lang, "findings")
+    else:
+        head = sec_label(lang, "clean")
+    lines = [f"# {sec_label(lang, 'verdict')} · {report.target} · {report.box}-box · "
+             f"{sec_label(lang, 'round')} {report.round}: {head}", ""]
+
+    for key, head_key in ((EXPLOITABLE, "exploit_head"), (UNPROVEN, "unproven_head"),
+                          (HARDENING, "hardening_head")):
+        group = sorted(getattr(decision, {EXPLOITABLE: "exploitable", UNPROVEN: "unproven",
+                                          HARDENING: "hardening"}[key]), key=_sev_rank)
+        if group:
+            lines += [f"## {sec_label(lang, head_key)}", ""]
+            lines += [_sec_finding_line(f, lang) for f in group] + [""]
+
+    if decision.defects:
+        lines += [f"## {sec_label(lang, 'defects')}", ""]
+        lines += [f"- {d}" for d in decision.defects] + [""]
+
+    lines += [f"## {sec_label(lang, 'not_reached')}", "", report.not_reached or "—", ""]
+
+    if report.scanner:
+        lines += [f"## {sec_label(lang, 'scanner')}", ""]
+        lines += [f"- {tool}: {result}" for tool, result in report.scanner.items()] + [""]
+
+    spend = report.spend or {}
+    lines.append(f"{sec_label(lang, 'spend')}: {spend.get('requests', '?')} "
+                 f"{sec_label(lang, 'requests')}, {spend.get('minutes', '?')} "
+                 f"{sec_label(lang, 'minutes')}.")
+    return "\n".join(lines) + "\n"
+
+
+SEC_TEMPLATE: dict[str, Any] = {
+    "target": "<the stand you pointed the audit at, e.g. http://localhost:3000>",
+    "box": "black",
+    "round": 1,
+    "scanner": {"gitleaks": "clean", "osv-scanner": "0 advisories"},
+    "findings": [],
+    "_example_finding": {
+        "class": EXPLOITABLE,
+        "severity": "critical",
+        "title": "<one line: what breaks>",
+        "attacker": "<who: anon, any authenticated tenant, a low-priv user…>",
+        "entry_point": "<the request: GET /api/orders/{id}>",
+        "boundary": "<what is crossed: tenant isolation, authentication, authorization>",
+        "impact": "<what it costs: read another tenant's orders>",
+        "poc": "<a transcript filename in this dir the refuter can replay: 006-idor.http>",
+        "refuter": "confirmed",
+        "evidence": ["db:SELECT tenant_id FROM orders WHERE id=1042 → tenantB, returned to tenantA"],
+    },
+    "not_reached": "<what you could not reach and why — this line is mandatory>",
+    "spend": {"requests": 0, "minutes": 0},
+}
+
+
+def sec_report_path(run: str, root: pathlib.Path) -> pathlib.Path:
+    return root / run / SEC_REPORT_NAME
+
+
+def run_security_gate(run: str, *, write: bool, tracker: pathlib.Path,
+                      root: pathlib.Path, lang: str, expect_tree: str | None = None,
+                      tree_ignore: tuple[str, ...] = ()) -> int:
+    """0 — clean, 1 — exploitable findings (action needed), 2 — defective/could-not."""
+    path = sec_report_path(run, root)
+    if not path.is_file():
+        print(f"[verdict] no {path}: the audit left no report. "
+              f'That is "could not", not "clean".', file=sys.stderr)
+        return 2
+    try:
+        report = parse_security(json.loads(path.read_text(encoding="utf-8")))
+    except (json.JSONDecodeError, BadReport) as exc:
+        print(f"[verdict] the audit report does not parse: {exc}", file=sys.stderr)
+        return 2
+
+    tree = None
+    if expect_tree:
+        try:
+            digest, moved = tree_state(ignore=tree_ignore)
+            tree = (expect_tree, digest, moved)
+        except (subprocess.SubprocessError, OSError, FileNotFoundError):
+            tree = (expect_tree, "", ())
+
+    decision = security_gate(report, tree=tree, evidence_dir=path.parent)
+    text = render_security(report, decision, lang)
+    print(text)
+    if write:
+        out = tracker / run / "audit-verdict.md"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(text, encoding="utf-8")
+        print(f"[verdict] written to {out}", file=sys.stderr)
+    if decision.defects:
+        return 2
+    return 1 if decision.exploitable else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="aikit acceptance gate")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -796,6 +1138,28 @@ def build_parser() -> argparse.ArgumentParser:
     tree.add_argument("--tree-ignore", metavar="GLOB", action="append", default=[],
                       help="generated paths to leave out of the fingerprint (repeatable)")
     tree.add_argument("--show", action="store_true", help="also list what is currently dirty")
+
+    # The security-audit gate. A different report shape, so a subcommand of its
+    # own with its own actions rather than more flags on `gate`.
+    security = sub.add_parser("security", help="the security-audit gate")
+    sec_sub = security.add_subparsers(dest="sec_command", required=True)
+
+    sec_template = sec_sub.add_parser("template", help="empty audit-report skeleton on stdout")
+    sec_template.add_argument("target")
+
+    sec_gate = sec_sub.add_parser("gate", help="0 — clean, 1 — exploitable found, 2 — defective")
+    sec_gate.add_argument("run")
+    sec_gate.add_argument("--write", action="store_true",
+                          help="also write the verdict text into the run's tracker")
+    sec_gate.add_argument("--tracker", type=pathlib.Path, default=pathlib.Path("docs/tracker"))
+    sec_gate.add_argument("--evidence-root", dest="root", type=pathlib.Path,
+                          default=pathlib.Path(".security"))
+    sec_gate.add_argument("--lang", default="en", choices=sorted(SEC_LABELS))
+    sec_gate.add_argument("--expect-tree", metavar="DIGEST",
+                          help="the `verdict tree` digest taken before the audit (white/gray-box); "
+                               "the gate blocks if the working tree moved during it")
+    sec_gate.add_argument("--tree-ignore", metavar="GLOB", action="append", default=[],
+                          help="generated paths the tripwire should not count (repeatable)")
     return parser
 
 
@@ -805,6 +1169,15 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(dict(TEMPLATE, milestone=args.milestone),
                          ensure_ascii=False, indent=2))
         return 0
+    if args.command == "security":
+        if args.sec_command == "template":
+            print(json.dumps(dict(SEC_TEMPLATE, target=args.target),
+                             ensure_ascii=False, indent=2))
+            return 0
+        return run_security_gate(args.run, write=args.write, tracker=args.tracker,
+                                 root=args.root, lang=args.lang,
+                                 expect_tree=args.expect_tree,
+                                 tree_ignore=tuple(args.tree_ignore))
     if args.command == "tree":
         try:
             digest, moved = tree_state(ignore=tuple(args.tree_ignore))

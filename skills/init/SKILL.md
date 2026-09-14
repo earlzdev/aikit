@@ -39,8 +39,10 @@ sitting in `Makefile` wastes the owner's attention on the wrong questions.
 - **A plan.** `docs/PLAN.md`, `PLAN.md`, `ROADMAP.md`. If one exists, read its
   wording and take `plan.markers` from what it actually says. Never impose the
   defaults on a plan that already has its own words.
-- **An acceptance harness.** Does anything already bring up a disposable
-  stand — `scripts/e2e/`, a compose file with a test profile, a `stand.sh`?
+- **An acceptance harness — which the security audit reuses.** Does anything
+  already bring up a disposable stand — `scripts/e2e/`, a compose file with a
+  test profile, a `stand.sh`? The same stand serves both `acceptance` and
+  `/aikit:security-audit`, so find it once.
 - **Language.** What language is the existing plan, changelog and docs written
   in? That is `language`.
 
@@ -61,6 +63,13 @@ do not ask it again. Batch what remains. Typically:
   out of the config entirely and added later.
 - For acceptance: how a disposable stand comes up, whether a read-only database
   role exists or must be made, and the addresses a person would use.
+- Whether a **security audit** is wanted (`/aikit:security-audit`) — optional and
+  leavable-for-later, exactly like acceptance. If yes, it reuses the acceptance
+  stand and roles, so the only genuinely new answers are: the `scope.targets` it
+  may attack (the stand's own addresses), the `box` (`black`, `gray` or `white`),
+  and — only when a target is not a loopback address — the owner attesting they
+  own it. **Never set `scope.authorized: true` on the owner's behalf**; it is a
+  written attestation, so it is an answer you are given, never one you infer.
 
 ## 3. Write `aikit.yml`
 
@@ -72,7 +81,8 @@ expected, and it is why the version check there matters. If you end up writing
 `plugin_root:` into the config, write it in this pass rather than coming back
 to edit a file you were told to write once —
 read it before writing, and write only the keys this project actually needs.
-Omitting the whole `acceptance` block is a valid, common configuration.
+Omitting the whole `acceptance` block — or the `security` block — is a valid,
+common configuration; either can be added later without touching anything else.
 
 Add `evidence` (default `.acceptance`) to `.gitignore`. Screenshots and tree
 dumps must never enter the repository — they swell it and leave nothing
@@ -113,6 +123,18 @@ these keys only say which ones reach the product, so a key left vague costs it
 budget hunting for them.
 Interview for those the same way: what reaches this product the way a person
 does, and what can read its data without being able to change it.
+
+**The security audit shares all of the above.** If it is wanted, its stand IS
+the acceptance stand — point `security.stand` at the same scripts rather than
+writing a second one, and let `security.truth` reuse the same read-only role.
+What is genuinely new is small and cannot be inferred: `security.scope` (the
+fence — the addresses it may attack, and `authorized` only for a non-loopback
+target the owner has attested to owning), `security.roles` (the identities it
+attacks as — reuse the acceptance seed's logins), and `security.box`. Its hands
+are aikit's own `bin/probe` unless you set `security.probe`; unlike acceptance's
+browser driver, `probe` also enforces the scope fence, so a substitute must too.
+`$AIKIT/docs/security-audit.md` is the full contract. The audit reports and never
+fixes, so it needs no write access to anything.
 
 ## 5. Prove it, don't declare it
 
@@ -177,7 +199,27 @@ milestones later.
 5. If acceptance is configured: `acceptance.stand.up`, then the query command,
    then `acceptance.stand.down`. Confirm the stand actually came up and the
    query actually returned rows.
+6. If the security audit is configured: prove the FENCE and the gate, neither of
+   which needs the stand up.
+   ```bash
+   # The fence refuses anything outside scope, before opening a socket.
+   "$AIKIT/bin/probe" --evidence-root /tmp/aikit-probe begin fence-check \
+       --target <security.scope.targets[0]> --requests 5 --minutes 5
+   "$AIKIT/bin/probe" --evidence-root /tmp/aikit-probe request GET http://example.com/
+   #   → REFUSED with exit 3, no socket opened. A fence that lets example.com
+   #     through is worse than none — this is the step that proves it does not.
+
+   # The gate blesses a complete report and rejects an incomplete one.
+   "$AIKIT/bin/verdict" security template <security.scope.targets[0]> \
+       > /tmp/aikit-probe/fence-check/audit.json
+   "$AIKIT/bin/verdict" security gate fence-check --evidence-root /tmp/aikit-probe  # exit 0
+   ```
+   Then blank the `not_reached` field in that file and re-run the gate: it must
+   exit 2 and name the missing line. As with the acceptance gate above, the run
+   has to reach exit 0 first — a gate that cannot fail is not a gate, and only
+   the two runs disagreeing proves this one can.
 
 Then tell the owner what was written, what they still need to fill in, and the
-one command that starts real work: `/aikit:plan` for a new plan, or
-`/aikit:autopilot` when a plan is already approved.
+one command that starts real work: `/aikit:plan` for a new plan,
+`/aikit:autopilot` when a plan is already approved, or `/aikit:security-audit`
+to audit a running stand.
