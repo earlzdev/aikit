@@ -5,6 +5,10 @@ description: Set aikit up in a project — work out its zones and verify command
 
 # init — teach aikit this project
 
+In Codex, first read [the runtime contract](../../docs/codex-runtime.md).
+Its dispatch, model, binary discovery and Git-mode rules replace Claude-specific
+operations below. Explicit owner restrictions always take precedence.
+
 <!--
 WHAT: writes `aikit.yml` and proves it works.
 WHY:  aikit ships a method, not templates. Everything project-specific is read

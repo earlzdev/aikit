@@ -2,6 +2,38 @@
 
 Newest first. What changed, and why.
 
+## 0.6.0 — 2026-10-13
+
+Reuse aikit's harness in local Codex CLI while keeping the same six skills,
+five role procedures, `aikit.yml`, and evidence gates.
+
+- **A self-contained Codex package.** `bin/codex-kit build` generates the
+  plugin, local marketplace and project-bound MCP role broker from the shared
+  sources. No second set of workflows to maintain.
+- **Isolated role sessions.** Hold the implementer across fix rounds; start
+  reviewers, acceptance and refuters fresh. Reviewer and refuter source access
+  is read-only, including shell commands, with explicitly writable scratch or
+  evidence. The host broker avoids nested OS sandboxes in orchestrated runs.
+- **Local work by default.** Content snapshots include untracked files and
+  let each step be reviewed without staging, stashing or checkpoint commits.
+  The broker exposes no publishing or checkpoint mode.
+- **Stronger acceptance tripwires.** Fingerprints include actual working and
+  staged contents, detecting edits to files whose Git status was already dirty.
+- **Runtime guidance and checks.** Document supported model selection,
+  authenticated session storage, network access, and scoped broker approval.
+  Real disposable-project runs exercised setup, planning, delegated autopilot,
+  blocking review and held-builder repair, blind CLI acceptance, and security
+  proof/refutation. All 185 regression tests and installation/sandbox smoke
+  checks passed.
+
+Support is limited to the tested local CLI path with command-based product
+hands. Browser acceptance, external product MCP hands, scanner integrations,
+and cloud/desktop model execution were not validated by these fixtures.
+The live orchestrator used an explicitly configured project-bound broker;
+plugin auto-discovery across desktop surfaces is not claimed tested.
+
+Install and runtime details: [`docs/codex-runtime.md`](docs/codex-runtime.md).
+
 ## 0.5.0 — 2026-09-14
 
 A security audit that has to prove what it finds — standalone, not wired into

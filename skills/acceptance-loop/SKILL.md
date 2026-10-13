@@ -5,6 +5,10 @@ description: After step-loop, put a finished milestone through acceptance — a 
 
 # acceptance-loop — the second check beside review: is this fit to use?
 
+In Codex, first read [the runtime contract](../../docs/codex-runtime.md).
+Its dispatch, model, binary discovery and Git-mode rules replace Claude-specific
+operations below. Explicit owner restrictions always take precedence.
+
 <!--
 WHAT: the phase between step-loop and merge. Review answers "is the code
       right?". Acceptance answers a different question: "can this be used?"

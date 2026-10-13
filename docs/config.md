@@ -190,6 +190,31 @@ count. Keep it short. Every entry here is a place the tripwire stops watching.
 reader could learn from this block WHICH FILES changed, it is over-specified
 and the acceptance phase is worth less.
 
+## Codex runtime overrides
+
+Codex reuses this configuration and its existing zones, evidence, stand and
+truth commands. Optional model overrides distinguish Codex models from Claude
+aliases without changing the existing `review.model` values:
+
+```yaml
+runtime:
+  codex:
+    models:
+      # Use exact model identifiers available to your Codex installation.
+      implementer: your-codex-model
+      reviewer: your-codex-model
+      acceptance: your-codex-model
+      security-hunter: your-codex-model
+      security-refuter: your-other-codex-model
+```
+
+Omit overrides to use the current orchestrator model when its exact supported
+identifier is observable, passed explicitly to the CLI runner. If unavailable,
+disclose use of the account's CLI default rather than guessing from the agent's
+identity. Never translate `opus`, `sonnet` or `haiku` automatically. See
+[the Codex runtime contract](codex-runtime.md) for model precedence, installation
+paths, agent isolation, and local snapshot reviews without commits.
+
 ## What aikit does NOT read
 
 No key points at source files, module names, or a diff. The acceptance agent

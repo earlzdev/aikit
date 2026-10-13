@@ -1,0 +1,159 @@
+#!/usr/bin/env python3
+"""Local stdio MCP broker for aikit roles; keeps Codex out of nested OS sandboxes.
+
+The broker binds one project at startup. It exposes no arbitrary shell command
+or executable selection; all role execution goes through codex-kit profiles.
+"""
+from __future__ import annotations
+
+import argparse
+import importlib.machinery
+import importlib.util
+import json
+import os
+from pathlib import Path
+import re
+import signal
+import subprocess
+import sys
+import uuid
+
+ROOT = Path(__file__).resolve().parents[1]
+loader = importlib.machinery.SourceFileLoader("aikit_broker_runner", str(ROOT / "bin/codex-kit"))
+spec = importlib.util.spec_from_loader(loader.name, loader)
+kit = importlib.util.module_from_spec(spec)
+loader.exec_module(kit)
+
+SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "properties": {
+        "role": {"type": "string", "enum": list(kit.ROLES)},
+        "brief": {"type": "string", "minLength": 1, "maxLength": 100000},
+        "model": {"type": "string", "minLength": 1},
+        "resume": {"type": "string", "description": "Previous broker run ID, only for held implementer or hunter"},
+        "timeout": {"type": "integer", "minimum": 1, "maximum": 600},
+    },
+    "required": ["role", "brief"],
+}
+
+
+class Broker:
+    def __init__(self, project: Path, evidence: Path):
+        self.project = kit.project_root(project)
+        # Init can add the ignore rule after tool discovery. Do not mutate the
+        # project or require that rule merely to list the broker's capabilities.
+        self.evidence = evidence.resolve()
+        self.runs = self.evidence / "codex-roles"
+        self.active = None
+
+    def run_role(self, args: dict) -> dict:
+        if set(args) - set(SCHEMA["properties"]):
+            raise ValueError("unknown role arguments")
+        role, brief = args.get("role"), args.get("brief")
+        if role not in kit.ROLES or not isinstance(brief, str) or not brief.strip() or len(brief) > 100000:
+            raise ValueError("a known role and nonempty bounded brief are required")
+        timeout = args.get("timeout", 180)
+        if isinstance(timeout, bool) or not isinstance(timeout, int) or not 1 <= timeout <= 600:
+            raise ValueError("timeout must be an integer from 1 to 600 seconds")
+        model = args.get("model")
+        if model is not None and (not isinstance(model, str) or not model.strip()):
+            raise ValueError("model must be a nonempty identifier")
+        kit.safe_artifact(self.project, self.evidence, directory=True)
+        self.evidence.mkdir(parents=True, exist_ok=True)
+        self.runs.mkdir(exist_ok=True)
+        resume = args.get("resume")
+        if resume is not None:
+            if not isinstance(resume, str) or not re.fullmatch(r"[0-9a-f]{32}", resume):
+                raise ValueError("resume must be a broker-issued run ID")
+            if role in kit.FRESH_ONLY:
+                raise ValueError("this role must start fresh")
+            previous = self.runs / resume
+            if not (previous / "state.json").is_file():
+                raise ValueError("resume run does not exist in this broker's evidence")
+        else:
+            previous = None
+        run_id = uuid.uuid4().hex
+        output = self.runs / run_id
+        brief_path = self.runs / (run_id + ".brief.txt")
+        brief_path.write_text(brief)
+        argv = [sys.executable, str(ROOT / "bin/codex-kit"), "run", "--role", role,
+                "--project", str(self.project), "--brief", str(brief_path),
+                "--output", str(output), "--timeout", str(timeout)]
+        if model is not None:
+            argv += ["--model", model]
+        if previous is not None:
+            argv += ["--resume", str(previous)]
+        if role == "security-refuter":
+            argv += ["--evidence-root", str(self.evidence)]
+        # The caller cannot enable checkpoint mode, change the workspace, or
+        # request an unrestricted profile through this tool.
+        process = subprocess.Popen(argv, cwd=self.project, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, text=True, start_new_session=True)
+        self.active = process
+        try:
+            stdout, stderr = process.communicate(timeout=timeout + 20)
+        finally:
+            kit.terminate(process)
+            self.active = None
+        result = subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
+        state_path, report_path = output / "state.json", output / "report.txt"
+        state = json.loads(state_path.read_text()) if state_path.exists() else {"status": "failed"}
+        report = report_path.read_text() if report_path.exists() else ""
+        return {"run_id": run_id, "role": role, "exit_code": result.returncode,
+                "status": state["status"], "session_id": state.get("session_id"),
+                "report": report[:40000], "report_path": str(report_path),
+                "state_path": str(state_path),
+                "error": result.stderr[-1500:] if result.returncode else ""}
+
+    def request(self, method: str, params: dict) -> dict:
+        if method == "initialize":
+            return {"protocolVersion": params.get("protocolVersion", "2024-11-05"),
+                    "capabilities": {"tools": {}},
+                    "serverInfo": {"name": "aikit-roles", "version": "0.1.0"},
+                    "instructions": "Use run_role to dispatch aikit roles outside the shell sandbox. Runs are local-only; completion is not a gate verdict. Never put implementation details in an acceptance brief."}
+        if method == "ping":
+            return {}
+        if method == "tools/list":
+            return {"tools": [{"name": "run_role", "description": "Run an isolated aikit Codex role in this workspace. Held builders/hunters may resume a broker run ID. Reviewers, acceptance and refuters always start fresh. Local-only; no checkpoint/publish mode.",
+                               "inputSchema": SCHEMA,
+                               "annotations": {"readOnlyHint": False, "destructiveHint": True,
+                                               "idempotentHint": False, "openWorldHint": True}}]}
+        if method == "tools/call":
+            if params.get("name") != "run_role":
+                raise ValueError("unknown tool")
+            result = self.run_role(params.get("arguments", {}))
+            return {"content": [{"type": "text", "text": json.dumps(result)}],
+                    "isError": result["exit_code"] != 0}
+        raise ValueError("unknown method")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--project", type=Path, default=Path.cwd())
+    parser.add_argument("--evidence-root", type=Path)
+    args = parser.parse_args()
+    evidence = args.evidence_root or args.project / ".acceptance"
+    broker = Broker(args.project, evidence)
+    def stop(*_args):
+        if broker.active is not None:
+            kit.terminate(broker.active)
+        raise SystemExit(0)
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+    for line in sys.stdin:
+        request = None
+        try:
+            request = json.loads(line)
+            if "id" not in request:  # initialized/cancelled notifications
+                continue
+            result = broker.request(request["method"], request.get("params", {}))
+            response = {"jsonrpc": "2.0", "id": request["id"], "result": result}
+        except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError) as exc:
+            response = {"jsonrpc": "2.0", "id": request.get("id") if isinstance(request, dict) else None,
+                        "error": {"code": -32602, "message": str(exc)}}
+        print(json.dumps(response), flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

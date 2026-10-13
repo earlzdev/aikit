@@ -1,0 +1,392 @@
+#!/usr/bin/env python3
+"""Build the Codex adapter, run isolated roles, and review uncommitted steps.
+
+Standard library only. Workflow YAML is read by the caller, not this tool.
+No command in this program stages, commits, pushes, or installs a plugin.
+"""
+from __future__ import annotations
+
+import argparse
+import base64
+import difflib
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import signal
+import stat
+import subprocess
+import sys
+import time
+import uuid
+
+ROOT = Path(__file__).resolve().parents[1]
+ROLES = ("implementer", "reviewer", "acceptance", "security-hunter", "security-refuter")
+FRESH_ONLY = {"reviewer", "acceptance", "security-refuter"}
+READ_ONLY = {"reviewer", "security-refuter"}
+
+
+def write_json(path: Path, value: object) -> None:
+    path.write_text(json.dumps(value, indent=2, ensure_ascii=True) + "\n")
+
+
+def git(project: Path, *args: str) -> bytes:
+    return subprocess.run(["git", *args], cwd=project, check=True,
+                          capture_output=True, timeout=30).stdout
+
+
+def head(project: Path) -> str | None:
+    result = subprocess.run(["git", "rev-parse", "--verify", "HEAD"], cwd=project,
+                            capture_output=True, timeout=30)
+    if result.returncode == 128:
+        return None  # An initialized project may not have its first commit yet.
+    result.check_returncode()
+    return os.fsdecode(result.stdout).strip()
+
+
+def project_root(project: Path) -> Path:
+    project = project.resolve()
+    if Path(os.fsdecode(git(project, "rev-parse", "--show-toplevel")).strip()).resolve() != project:
+        raise ValueError("--project must be the Git repository root")
+    return project
+
+
+def safe_artifact(project: Path, target: Path, *, directory: bool = False) -> Path:
+    """Artifacts inside the tree must not contaminate snapshots or tripwires."""
+    target = target.resolve()
+    if target == project or target in project.parents or target == ROOT or target in ROOT.parents:
+        raise ValueError("artifact output cannot contain the project or package")
+    if project in target.parents:
+        relative = target.relative_to(project).as_posix()
+        result = subprocess.run(["git", "check-ignore", "--quiet", "--", relative + ("/" if directory else "")],
+                                cwd=project, timeout=30)
+        if result.returncode != 0:
+            raise ValueError("artifact output inside the project must be gitignored")
+        if git(project, "ls-files", "-z", "--", relative):
+            raise ValueError("artifact output must not contain tracked files, even if gitignored")
+    return target
+
+
+def capture(project: Path) -> dict:
+    paths = set(git(project, "ls-files", "--cached", "--others", "--exclude-standard", "-z").split(b"\0"))
+    files = {}
+    for raw in sorted(paths - {b""}):
+        name = os.fsdecode(raw)
+        path = project / name
+        if path.is_symlink():
+            data, kind, mode = os.fsencode(os.readlink(path)), "symlink", "120000"
+        elif not path.exists():
+            continue
+        elif path.is_file():
+            # Do not follow a parent symlink outside the repository.
+            if project not in path.resolve().parents:
+                raise ValueError(f"path escapes the project: {name}")
+            data, kind = path.read_bytes(), "file"
+            mode = "100755" if path.stat().st_mode & stat.S_IXUSR else "100644"
+        else:
+            raise ValueError(f"unsupported path (including submodules): {name}")
+        files[name] = {"kind": kind, "mode": mode,
+                       "data": base64.b64encode(data).decode("ascii")}
+    return {"version": 1, "project": str(project), "head": head(project),
+            "files": files}
+
+
+def content_diff(before: dict, after: dict) -> str:
+    lines = []
+    for name in sorted(before["files"].keys() | after["files"].keys()):
+        old, new = before["files"].get(name), after["files"].get(name)
+        if old == new:
+            continue
+        label = json.dumps(name, ensure_ascii=True)
+        lines.append(f"diff --aikit {label}\n")
+        if old is None:
+            lines.append(f"new {new['kind']} mode {new['mode']}\n")
+        elif new is None:
+            lines.append(f"deleted {old['kind']} mode {old['mode']}\n")
+        elif (old["mode"], old["kind"]) != (new["mode"], new["kind"]):
+            lines.append(f"mode/kind {old['mode']} {old['kind']} -> {new['mode']} {new['kind']}\n")
+        a, b = (base64.b64decode(x["data"]) if x else b"" for x in (old, new))
+        if a == b:
+            continue
+        try:
+            if b"\0" in a or b"\0" in b:
+                raise UnicodeError()
+            at, bt = a.decode("utf-8"), b.decode("utf-8")
+        except UnicodeError:
+            lines.append(f"binary content {hashlib.sha256(a).hexdigest()} -> {hashlib.sha256(b).hexdigest()}\n")
+            continue
+        for line in difflib.unified_diff(at.splitlines(keepends=True), bt.splitlines(keepends=True),
+                                         fromfile=f"before/{label}", tofile=f"after/{label}"):
+            lines.append(line if line.endswith("\n") else line + "\n\\ No newline at end of file\n")
+    return "".join(lines)
+
+
+def build(output: Path) -> Path:
+    output = output.resolve()
+    # An existing output is never recursively deleted or overwritten.
+    if output.exists():
+        raise ValueError("build output already exists; choose a new output directory")
+    if output == ROOT or output in ROOT.parents:
+        raise ValueError("build output cannot contain the source package")
+    output.mkdir(parents=True)
+    package = output / "aikit"
+    package.mkdir()
+    for directory in ("skills", "agents", "bin", "docs"):
+        shutil.copytree(ROOT / directory, package / directory,
+                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.gif", "*.html", "capture.mjs"))
+    shutil.copy2(ROOT / "LICENSE", package / "LICENSE")
+    meta = json.loads((ROOT / ".claude-plugin/plugin.json").read_text()) if (ROOT / ".claude-plugin/plugin.json").exists() else json.loads((ROOT / "plugin.json").read_text())
+    manifest = {"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+                "name": "aikit", "version": meta["version"],
+                "description": "Milestone delivery with independent review, acceptance evidence and security audits for Codex.",
+                "author": meta["author"], "homepage": meta["homepage"],
+                "repository": meta["repository"], "license": "MIT",
+                "extensions": {"com.openai": {"onboardingSkill": "./skills/init/SKILL.md"}}}
+    write_json(package / "plugin.json", manifest)
+    write_json(package / "mcp.json", {
+        "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+        "mcpServers": {"aikit_roles": {"type": "stdio", "command": "python3",
+                                      "args": ["${PLUGIN_ROOT}/bin/codex-mcp"],
+                                      "tool_timeout_sec": 600}}})
+    catalog = output / ".agents/plugins/marketplace.json"
+    catalog.parent.mkdir(parents=True)
+    write_json(catalog, {
+        "name": "aikit-local", "interface": {"displayName": "aikit local development"},
+        "plugins": [{"name": "aikit", "source": {"source": "local", "path": "./aikit"},
+                     "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
+                     "category": "Productivity"}]})
+    return package
+
+
+def instructions(role: str, git_mode: str) -> str:
+    source = (ROOT / "agents" / f"{role}.md").read_text()
+    body = source.split("\n---", 1)[1].lstrip()
+    overlay = f"""You are aikit's {role} role in a separate Codex CLI session.
+Read and obey {ROOT / 'docs/codex-runtime.md'} before the role procedure below.
+Runtime-specific instructions replace Claude tool and checkpoint assumptions.
+Git mode: {git_mode}. Explicit owner restrictions take precedence.
+Do not spawn subagents or invoke another aikit role. Return your own report.
+Read AGENTS.md and applicable nested rules when source access is part of your role.
+"""
+    if git_mode == "local":
+        overlay += "Do not stage, stash, commit, switch branches, push, merge, or open PRs. Use the supplied file snapshot baseline for review. Leave all work local.\n"
+    if role in READ_ONLY:
+        overlay += "Your shell is sandboxed read-only. Do not request elevation. If verification is denied, report it as blocked; never claim CLEAN without verification.\n"
+    if role == "acceptance":
+        overlay += "Do not read AGENTS.md, CLAUDE.md, source, step notes, a diff, or implementation summaries. Only use the sanitized product brief and product evidence.\n"
+    return overlay + "\nRole procedure (subject to the runtime rules above):\n" + body
+
+
+def command(role: str, project: Path, output: Path, model: str | None,
+            git_mode: str, session: str | None, executable: str,
+            evidence: Path | None = None) -> list[str]:
+    if model and re.match(r"^(opus|sonnet|haiku)(?:$|[-:])", model, re.I):
+        raise ValueError("Claude model aliases cannot be used in Codex; configure runtime.codex.models")
+    profile = ":read-only" if role in READ_ONLY else ":workspace"
+    args = [executable, "--no-daemon", "exec"]
+    if session:
+        args.append("resume")
+    args += ["--ignore-user-config", "--json", "-c", "default_permissions=" + json.dumps(profile),
+             "-c", 'approval_policy="never"', "-c", "features.multi_agent=false",
+             "-c", "features.hooks=false", "-c", "features.apps=false",
+             "-c", "features.plugins=false", "-c", "features.memories=false",
+             "-c", "features.goals=false",
+             "-c", "project_doc_max_bytes=0",
+             "-c", "developer_instructions=" + json.dumps(instructions(role, git_mode)),
+             "-o", str(output / "report.txt")]
+    if role in READ_ONLY:
+        # Source stays read-only; verification caches and probe evidence may write
+        # only to explicitly named artifact directories.
+        profile_name = "aikit-" + role
+        writable = [output / "scratch"] + ([evidence] if evidence else [])
+        filesystem = "{" + ", ".join(json.dumps(str(path)) + '="write"' for path in writable) + "}"
+        args += ["-c", 'default_permissions="' + profile_name + '"',
+                 "-c", f'permissions.{profile_name}.extends=":read-only"',
+                 "-c", f'permissions.{profile_name}.filesystem=' + filesystem]
+        if role == "security-refuter":
+            args += ["-c", f"permissions.{profile_name}.network.enabled=true"]
+    elif role in {"acceptance", "security-hunter"}:
+        # Product hands need CDP/HTTP access to the disposable stand. The
+        # hunter's probe still enforces its narrower allowlist and budgets.
+        profile_name = "aikit-" + role
+        args += ["-c", 'default_permissions="' + profile_name + '"',
+                 "-c", f'permissions.{profile_name}.extends=":workspace"',
+                 "-c", f"permissions.{profile_name}.network.enabled=true"]
+    if not session:
+        args += ["-C", str(project)]
+    if model:
+        args += ["--model", model]
+    if session:
+        args.append(session)
+    args.append("-")
+    return args
+
+
+def terminate(process: subprocess.Popen) -> None:
+    # The parent may already have exited while a shell child remains alive.
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    if process.poll() is None:
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    if process.poll() is None:
+        process.wait()
+
+
+def interrupt(*_args) -> None:
+    raise KeyboardInterrupt
+
+
+def run(args: argparse.Namespace) -> int:
+    project = project_root(args.project)
+    output = safe_artifact(project, args.output, directory=True)
+    evidence = safe_artifact(project, args.evidence_root, directory=True) if args.evidence_root else None
+    if evidence and not evidence.is_dir():
+        raise ValueError("--evidence-root must be an existing evidence directory")
+    if args.role == "security-refuter" and evidence is None:
+        raise ValueError("security-refuter requires --evidence-root for probe replay artifacts")
+    # Until explicit MCP support is implemented, do not load repo-configured
+    # servers or runtime overrides which can bypass shell sandbox guarantees.
+    user_config = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))) / "config.toml"
+    for directory in (project, *project.parents):
+        config = directory / ".codex/config.toml"
+        if config != user_config and config.exists():
+            raise ValueError("repo Codex config layers are not supported by the isolated runner yet")
+    brief = args.brief.read_text()
+    if not brief.strip():
+        raise ValueError("brief must not be empty")
+    if args.timeout <= 0:
+        raise ValueError("timeout must be positive")
+    session = None
+    if args.resume:
+        if args.role in FRESH_ONLY:
+            raise ValueError(f"{args.role} must start fresh every round")
+        previous = json.loads((args.resume / "state.json").read_text())
+        for key, expected in (("role", args.role), ("project", str(project)),
+                              ("git_mode", args.git_mode), ("package", str(ROOT)), ("model", args.model),
+                              ("evidence_root", str(evidence) if evidence else None)):
+            if previous.get(key) != expected:
+                raise ValueError(f"resume {key} differs from the original run")
+        if previous.get("status") != "completed":
+            raise ValueError("only a successfully completed session can be resumed")
+        session = str(uuid.UUID(previous["session_id"]))
+    argv = command(args.role, project, output, args.model, args.git_mode, session, args.codex, evidence)
+    output.mkdir(parents=True, exist_ok=False)
+    (output / "scratch").mkdir()
+    state = {"version": 1, "role": args.role, "project": str(project), "package": str(ROOT),
+             "git_mode": args.git_mode, "model": args.model, "session_id": session,
+             "status": "running", "started": time.time(), "evidence_root": str(evidence) if evidence else None}
+    write_json(output / "state.json", state)
+    process = None
+    returncode = 1
+    previous_sigterm = signal.signal(signal.SIGTERM, interrupt)
+    try:
+        with (output / "events.jsonl").open("w") as events, (output / "stderr.txt").open("w") as errors:
+            process = subprocess.Popen(argv, cwd=project, stdin=subprocess.PIPE,
+                                       stdout=events, stderr=errors, text=True, start_new_session=True)
+            try:
+                scratch_note = f"\n\nWritable verification scratch directory: {output / 'scratch'}\n"
+                process.communicate(brief + scratch_note if args.role in READ_ONLY else brief, timeout=args.timeout)
+                returncode = process.returncode
+                state["status"] = "completed" if returncode == 0 else "failed"
+            except subprocess.TimeoutExpired:
+                terminate(process)
+                state["status"], returncode = "timed_out", 124
+            except KeyboardInterrupt:
+                terminate(process)
+                state["status"], returncode = "interrupted", 130
+        turn_completed = False
+        for line in (output / "events.jsonl").read_text().splitlines():
+            try:
+                event = json.loads(line)
+                if event.get("type") == "thread.started":
+                    state["session_id"] = str(uuid.UUID(event["thread_id"]))
+                elif event.get("type") == "turn.completed":
+                    turn_completed = True
+                elif event.get("type") == "turn.failed":
+                    state["status"], returncode = "failed", returncode or 1
+            except (ValueError, KeyError, TypeError):
+                continue
+        report = output / "report.txt"
+        if returncode == 0 and (not turn_completed or not state["session_id"] or not report.exists() or not report.read_text().strip()):
+            state["status"], returncode = "incomplete", 1
+    except OSError as exc:
+        state["status"], state["error"] = "failed", str(exc)
+        returncode = returncode or 1
+    except KeyboardInterrupt:
+        state["status"], returncode = "interrupted", 130
+    finally:
+        if process is not None:
+            terminate(process)
+        state["finished"], state["exit_code"] = time.time(), returncode
+        write_json(output / "state.json", state)
+        signal.signal(signal.SIGTERM, previous_sigterm)
+    print(json.dumps({"status": state["status"], "session_id": state["session_id"],
+                      "report": str(output / "report.txt"), "state": str(output / "state.json")}))
+    return returncode
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="action", required=True)
+    package = sub.add_parser("build", help="generate a self-contained Codex plugin and local marketplace")
+    package.add_argument("--output", type=Path, required=True)
+    snap = sub.add_parser("snapshot", help="capture a baseline without staging or committing")
+    snap.add_argument("--project", type=Path, default=Path.cwd())
+    snap.add_argument("--output", type=Path, required=True)
+    diff = sub.add_parser("diff", help="compare a snapshot with local files, including untracked files")
+    diff.add_argument("--project", type=Path, default=Path.cwd())
+    diff.add_argument("--baseline", type=Path, required=True)
+    role = sub.add_parser("run", help="run an isolated Codex role; completion is not a gate verdict")
+    role.add_argument("--role", choices=ROLES, required=True)
+    role.add_argument("--project", type=Path, default=Path.cwd())
+    role.add_argument("--brief", type=Path, required=True)
+    role.add_argument("--output", type=Path, required=True)
+    role.add_argument("--resume", type=Path)
+    role.add_argument("--evidence-root", type=Path, help="ignored evidence directory writable by a read-only role")
+    role.add_argument("--model")
+    role.add_argument("--git-mode", choices=("local", "checkpoint"), default="local")
+    role.add_argument("--timeout", type=float, default=1800, help="wall-clock cap in seconds")
+    role.add_argument("--codex", default="codex", help="Codex CLI executable")
+    args = parser.parse_args(argv)
+    try:
+        if args.action == "build":
+            print(build(args.output))
+        elif args.action == "snapshot":
+            project = project_root(args.project)
+            output = safe_artifact(project, args.output)
+            snapshot = capture(project)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            with output.open("x") as handle:
+                json.dump(snapshot, handle, indent=2, ensure_ascii=True)
+                handle.write("\n")
+            print(output)
+        elif args.action == "diff":
+            project = project_root(args.project)
+            before = json.loads(args.baseline.read_text())
+            if before.get("version") != 1 or before.get("project") != str(project):
+                raise ValueError("baseline version or project does not match")
+            after = capture(project)
+            if before["head"] != after["head"]:
+                raise ValueError("HEAD changed since the local baseline")
+            print(content_diff(before, after), end="")
+        else:
+            return run(args)
+    except (ValueError, OSError, KeyError, subprocess.SubprocessError) as exc:
+        print(f"[codex-kit] {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -5,6 +5,10 @@ description: Turn a request into a plan of numbered milestones in docs/PLAN.md â
 
 # plan â€” break the work into milestones a machine can finish and a person can check
 
+In Codex, first read [the runtime contract](../../docs/codex-runtime.md).
+Its dispatch, model, binary discovery and Git-mode rules replace Claude-specific
+operations below. Explicit owner restrictions always take precedence.
+
 <!--
 WHAT: authors and maintains the plan file every other aikit skill reads.
 WHY:  autopilot needs a unit of work with an end. "Build the feature" has no

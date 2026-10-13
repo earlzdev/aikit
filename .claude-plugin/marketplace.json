@@ -1,7 +1,7 @@
 {
   "$schema": "https://code.claude.com/schemas/marketplace.json",
   "name": "aikit",
-  "description": "Unattended delivery pipeline for Claude Code",
+  "description": "Delivery pipeline for Claude Code, with a local Codex CLI adapter",
   "owner": { "name": "earlzdev", "url": "https://github.com/earlzdev" },
   "plugins": [
     {

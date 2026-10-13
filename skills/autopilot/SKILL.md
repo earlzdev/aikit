@@ -5,6 +5,10 @@ description: Run the whole delivery pipeline unattended — plan into milestones
 
 # autopilot — the pipeline, running without someone watching it
 
+In Codex, first read [the runtime contract](../../docs/codex-runtime.md).
+Its dispatch, model, binary discovery and Git-mode rules replace Claude-specific
+operations below. Explicit owner restrictions always take precedence.
+
 <!--
 WHAT: the driver that strings plan → step-loop → acceptance-loop → close
       into one unattended run over a plan's milestones.

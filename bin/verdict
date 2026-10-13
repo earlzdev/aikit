@@ -196,22 +196,47 @@ def tree_state(cwd: pathlib.Path | None = None,
     Raises so the caller can fail CLOSED — a check that could not run is not a
     check that passed, the same rule the whole phase is built on.
     """
-    def git(*args: str) -> str:
+    def git(*args: str) -> bytes:
         return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True,
-                              text=True, timeout=30).stdout
+                              timeout=30).stdout
 
-    dirty = []
-    for line in git("status", "--porcelain").splitlines():
-        status, path = line[:2], line[3:].strip()
-        if " -> " in path:                      # a rename reports "old -> new"
-            path = path.split(" -> ")[-1]
-        path = path.strip('"')
+    root = pathlib.Path(os.fsdecode(git("rev-parse", "--show-toplevel")).strip())
+    dirty, records = [], []
+    entries = iter(git("status", "--porcelain=v1", "-z", "--untracked-files=all").split(b"\0"))
+    for entry in entries:
+        if not entry:
+            continue
+        status, path = os.fsdecode(entry[:2]), os.fsdecode(entry[3:])
+        original = next(entries) if "R" in status or "C" in status else b""
         if any(_matches(path, g) for g in ignore):
             continue
         dirty.append(f"{status} {path}")
+        target = root / path
+        if target.is_symlink():
+            content, mode = os.fsencode(os.readlink(target)), b"symlink"
+        elif target.is_file():
+            content = target.read_bytes()
+            mode = str(target.stat().st_mode & 0o777).encode()
+        elif target.is_dir():
+            # A dirty submodule may not be flattened into an ordinary file.
+            content = tree_state(target)[0].encode()
+            mode = b"submodule"
+        else:
+            content, mode = b"", b"deleted"
+        staged = git("diff", "--cached", "--binary", "--", path,
+                     *([os.fsdecode(original)] if original else []))
+        records.append((entry + b"\0" + original + b"\0" + mode + b"\0",
+                        hashlib.sha256(content).digest(), hashlib.sha256(staged).digest()))
     dirty.sort()
-    blob = git("rev-parse", "HEAD") + "\n" + "\n".join(dirty)
-    return hashlib.sha256(blob.encode()).hexdigest()[:16], tuple(d[3:] for d in dirty)
+    head = subprocess.run(["git", "rev-parse", "--verify", "HEAD"], cwd=cwd,
+                          capture_output=True, timeout=30)
+    if head.returncode not in (0, 128):
+        head.check_returncode()
+    digest = hashlib.sha256(head.stdout if head.returncode == 0 else b"unborn\n")
+    for record in sorted(records):
+        for part in record:
+            digest.update(part)
+    return digest.hexdigest()[:16], tuple(d[3:] for d in dirty)
 
 
 def tree_digest(cwd: pathlib.Path | None = None,

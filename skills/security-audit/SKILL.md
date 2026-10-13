@@ -5,6 +5,10 @@ description: Audit a running service you own for real, exploitable vulnerabiliti
 
 # security-audit — attack the running service, keep only what you can prove
 
+In Codex, first read [the runtime contract](../../docs/codex-runtime.md).
+Its dispatch, model, binary discovery and Git-mode rules replace Claude-specific
+operations below. Explicit owner restrictions always take precedence.
+
 <!--
 WHAT: a standalone audit of a running service. Not tied to a milestone, not
       wired into autopilot. You point it at a stand you own; it finds bugs and

@@ -2,14 +2,14 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "aikit",
   "displayName": "aikit",
-  "version": "0.5.0",
-  "description": "An unattended delivery pipeline for Claude Code: plan into numbered milestones, gate every step with a reviewer that cannot edit, then gate every milestone with an acceptance agent that never sees the diff. Nothing passes on the author's own word.",
+  "version": "0.6.0",
+  "description": "A delivery pipeline for Claude Code and local Codex CLI: plan into milestones, review every step independently, and gate acceptance on product evidence. Codex support ships through a generated package and project-bound role broker.",
   "author": { "name": "earlzdev" },
   "homepage": "https://github.com/earlzdev/aikit",
   "repository": "https://github.com/earlzdev/aikit",
   "license": "MIT",
   "keywords": [
     "pipeline", "autonomous", "review", "acceptance", "qa",
-    "milestones", "planning", "agents", "unattended"
+    "milestones", "planning", "agents", "unattended", "codex"
   ]
 }

@@ -1,6 +1,7 @@
 # aikit
 
-A delivery pipeline for [Claude Code](https://claude.com/claude-code) that can
+A delivery pipeline for [Claude Code](https://claude.com/claude-code), with a
+local Codex CLI adapter, that can
 run without someone watching it.
 
 Plan the work into numbered milestones. Take each step through a reviewer that
@@ -75,6 +76,53 @@ It reads the repo, asks only what it cannot infer, writes one `aikit.yml`, and
 **proves the pieces run** rather than declaring success.
 
 ## Use
+
+### Codex (local adapter)
+
+Build a self-contained Codex plugin from the same skills and role procedures:
+
+```sh
+python3 bin/codex-kit build --output out/codex-local
+```
+
+The plugin is `out/codex-local/aikit`; its local marketplace lives under
+`out/codex-local/.agents/plugins/`. To install it in your Codex environment:
+
+```sh
+codex plugin marketplace add ./out/codex-local
+codex plugin add aikit@aikit-local
+```
+
+These install commands change your Codex configuration; building alone does
+not. Start a new Codex session and invoke aikit's installed `init`, `plan`,
+`step-loop`, `acceptance-loop`, `autopilot`, or `security-audit` skill by name.
+The same `aikit.yml`, gates, evidence formats and stand commands are reused.
+
+The CLI adapter defaults to **local work without staging, commits or pushes**.
+It uses file snapshots for per-step review, fresh sessions for reviewers and
+acceptance, and a held CLI session for implementer fixes. Reviewer source
+access is read-only, including shell commands; scratch output is permitted.
+Orchestrated runs dispatch through a project-bound local MCP role broker to
+avoid nesting Codex OS sandboxes; standalone role calls can use the CLI runner.
+See [the runtime contract](docs/codex-runtime.md) for commands and limitations.
+Current support covers local CLI with command-based hands. Real dummy-project
+tests exercised setup, planning, broker-driven autopilot, a blocking review and
+held-builder repair, blind CLI acceptance, and security proof/refutation.
+Browser acceptance, external product MCP hands, scanners and cloud/desktop
+execution are not yet validated by these fixtures.
+
+Checks, including a disposable installation and real sandbox probe without
+model calls:
+
+```sh
+python3 -m unittest discover -s tests
+python3 tests/codex_smoke.py
+```
+
+Use a fresh build output directory for each rebuild; the builder never deletes
+an existing distribution. No generated workflow needs manual maintenance.
+
+### Claude Code
 
 ```
 /aikit:plan  <what to build>     # milestones, each with its own "done when"

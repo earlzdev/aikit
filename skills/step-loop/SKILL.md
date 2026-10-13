@@ -5,6 +5,10 @@ description: Build one step of a plan, then loop an independent reviewer over th
 
 # step-loop — build the step, then verify it independently until it holds
 
+In Codex, first read [the runtime contract](../../docs/codex-runtime.md).
+Its dispatch, model, binary discovery and Git-mode rules replace Claude-specific
+operations below. Explicit owner restrictions always take precedence.
+
 <!--
 WHAT: the one build-and-review implementation aikit ships. Anything with a
       review gate invokes THIS rather than restating round caps, the verdict
